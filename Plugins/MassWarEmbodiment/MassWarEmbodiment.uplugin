@@ -1,0 +1,46 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "MassWarEmbodiment",
+	"Description": "Optional MassWar feature plugin: full-Actor unit embodiment (a hero Character driven by the same StateTree decision logic as Mass units) and a cosmetic near-LOD Character puppet for ordinary Mass units.",
+	"Category": "MassWar",
+	"CreatedBy": "ArturToJa",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "MassWarEmbodiment",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "MassWar",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarStateTreeAI",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayStateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "StateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "MassGameplay",
+			"Enabled": true
+		}
+	]
+}
