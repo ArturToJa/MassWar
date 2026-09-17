@@ -1,0 +1,82 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.7",
+	"Category": "",
+	"Description": "",
+	"Modules": [
+		{
+			"Name": "MassWarExample",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "MassWar",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarCombat",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarSelection",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarStateTreeAI",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarReplication",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarFogOfWar",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarEmbodiment",
+			"Enabled": true
+		},
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "MassAI",
+			"Enabled": true
+		},
+		{
+			"Name": "MassCrowd",
+			"Enabled": true
+		},
+		{
+			"Name": "MassEntity",
+			"Enabled": true
+		},
+		{
+			"Name": "MassGameplay",
+			"Enabled": true
+		},
+		{
+			"Name": "StateGraph",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayStateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "StateTree",
+			"Enabled": true
+		}
+	]
+}
