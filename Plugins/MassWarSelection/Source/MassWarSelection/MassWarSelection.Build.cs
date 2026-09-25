@@ -20,6 +20,7 @@ public class MassWarSelection : ModuleRules
 				"MassCommon",
 				"MassSpawner",
 				"MassWar",
+				"MassWarFormations",
 			}
 			);
 	}

@@ -5,6 +5,9 @@
 #include "Interfaces/MassWarTeamProviderInterface.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "MassSpawnerSubsystem.h"
+#include "Visibility/MassWarGhostSubsystem.h"
+#include "UnitBrain/MassWarUnitStateView.h"
+#include "MassCommonFragments.h"
 #include "MassEntityManager.h"
 #include "GameFramework/PlayerController.h"
 
@@ -20,6 +23,45 @@ void UMassWarVisibilitySubsystem::PostInitialize()
 
 void UMassWarVisibilitySubsystem::SetTeamVisibility(TMap<uint8, TSet<FMassEntityHandle>>&& InTeamVisibleEnemies)
 {
+	// The local player of a listen server / standalone game has no replication bubble to lose units from, so its
+	// ghosts come from here: a unit its team could see and now cannot leaves a ghost; one it sees again clears it.
+	UWorld* World = GetWorld();
+	UMassWarGhostSubsystem* Ghosts = (World && !World->IsNetMode(NM_Client)) ? World->GetSubsystem<UMassWarGhostSubsystem>() : nullptr;
+	UMassSpawnerSubsystem* Spawner = Ghosts ? World->GetSubsystem<UMassSpawnerSubsystem>() : nullptr;
+	const uint8 LocalTeamId = Ghosts ? Ghosts->GetLocalTeamId() : 0;
+	if (Spawner && LocalTeamId != 0)
+	{
+		FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
+		const TSet<FMassEntityHandle>* OldVisible = TeamVisibleEnemies.Find(LocalTeamId);
+		const TSet<FMassEntityHandle>* NewVisible = InTeamVisibleEnemies.Find(LocalTeamId);
+		if (OldVisible)
+		{
+			for (const FMassEntityHandle& Entity : *OldVisible)
+			{
+				if (NewVisible && NewVisible->Contains(Entity))
+				{
+					continue;
+				}
+				const FTransformFragment* Transform = FMassWarUnitStateView::IsLiving(EntityManager, Entity) ? EntityManager.GetFragmentDataPtr<FTransformFragment>(Entity) : nullptr;
+				const FMassWarTeamFragment* Team = Transform ? EntityManager.GetFragmentDataPtr<FMassWarTeamFragment>(Entity) : nullptr;
+				if (Transform && Team)
+				{
+					Ghosts->AddGhostForEntity(Entity, Transform->GetTransform().GetLocation(), Transform->GetTransform().Rotator().Yaw, Team->TeamId);
+				}
+			}
+		}
+		if (NewVisible)
+		{
+			for (const FMassEntityHandle& Entity : *NewVisible)
+			{
+				if (!OldVisible || !OldVisible->Contains(Entity))
+				{
+					Ghosts->ClearGhostForEntity(Entity);
+				}
+			}
+		}
+	}
+
 	TeamVisibleEnemies = MoveTemp(InTeamVisibleEnemies);
 }
 

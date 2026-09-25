@@ -14,14 +14,12 @@ public class MassWarEmbodiment : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
-				"AIModule",
-				"StateTreeModule",
-				"GameplayStateTreeModule",
 				"MassEntity",
 				"MassCommon",
-				"MassSpawner",
+				"MassActors",
+				"MassLOD",
+				"MassRepresentation",
 				"MassWar",
-				"MassWarStateTreeAI",
 			}
 			);
 	}

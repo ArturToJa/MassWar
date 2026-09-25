@@ -9,7 +9,7 @@
 class APlayerController;
 
 /**
- * Server-only store of "which enemy entities is each team currently able to see" (radius-only for now -
+ * Server-only store of "which enemy entities is each team currently able to see" (radius plus line of sight -
  * a line-of-sight raycast pass is a documented follow-up), refreshed periodically by
  * UMassWarVisibilityProcessor. Binds MassWarReplication's relevancy delegate in PostInitialize() so an
  * enemy entity outside a team's sight is never replicated to that team's clients - Replication has no

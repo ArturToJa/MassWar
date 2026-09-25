@@ -19,6 +19,8 @@ public class MassWarStateTreeAI : ModuleRules
 				"MassSpawner",
 				"MassSignals",
 				"MassWar",
+				"MassWarPerception",
+				"MassWarFormations",
 				"StateTreeModule",
 				"MassAIBehavior",
 			}

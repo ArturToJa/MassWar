@@ -35,6 +35,11 @@ struct MASSWARCOMBAT_API FMassWarCombatParamsFragment : public FMassFragment
 	UPROPERTY(EditAnywhere, Category = "MassWar|Combat")
 	float AttackInterval = 1.f;
 
+	/** How far (uu) enemies can hear this unit's attacks - reported to MassWarPerception on every landed attack.
+	 *  0 = a silent attacker. */
+	UPROPERTY(EditAnywhere, Category = "MassWar|Combat")
+	float AttackNoiseRange = 2500.f;
+
 	/** Seconds accumulated since the last successful attack; processor-owned runtime state. */
 	UPROPERTY(Transient)
 	float TimeSinceLastAttack = 0.f;

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Formation/MassWarFormationTypes.h"
 #include "GameFramework/GameModeBase.h"
 #include "MassEntityTypes.h"
 #include "MassEntityHandle.h"
@@ -40,6 +41,14 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
 	int32 UnitsPerPlayer = 150;
+	/** How many of a player's units make up one formation (each formation spawns as its own cluster). */
+	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
+	int32 UnitsPerFormation = 30;
+
+	/** Shape and spacing the spawned formations use when they get a Move order. */
+	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
+	FMassWarFormationSettings FormationSettings;
+
 
 	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
 	float TeamOriginOffset = 4000.f;
@@ -67,16 +76,6 @@ private:
 
 	void SpawnUnitsForPlayer(UMassEntityConfigAsset& Config, uint32 PlayerId, uint8 TeamId, const FVector& Origin, int32 Count);
 
-	/** Pass 7 (MassWarEmbodiment) test harness: spawns one AMassWarUnitCharacter "hero" among the first
-	 *  connecting player's Mass units, gated to only that first player so the test scenario stays simple
-	 *  (one hero to observe, not one per player) - out of scope for selection/replication/fog-of-war. */
-	void SpawnHeroForPlayer(uint8 TeamId, uint32 PlayerId, const FVector& Origin);
-
-	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
-	TSubclassOf<APawn> HeroCharacterClass;
-
-	bool bHeroSpawned = false;
-
 	/** Dumps LOD/representation/transform state for a handful of spawned entities a couple seconds
 	 *  after spawn, to see directly (via log) whether Mass ever considers them renderable, instead of
 	 *  guessing further from the outside. Debug-only, not meant to stay long-term. */
@@ -98,8 +97,14 @@ private:
 	 *  needing mouse input. */
 	void DebugMoveFirstTeamTowardOthers();
 
+	/** Pass 7 test harness: "MassWar.DebugFocusUnits [Height]" teleports the local player's camera pawn
+	 *  directly above the first unit (default 600 units up) so the near-LOD Actor swap can be checked
+	 *  without hunting for it with WASD + zoom. */
+	void DebugFocusCameraOnUnits(const TArray<FString>& Args);
+
 	IConsoleCommand* DebugAttackConsoleCommand = nullptr;
 	IConsoleCommand* DebugMoveConsoleCommand = nullptr;
+	IConsoleCommand* DebugFocusConsoleCommand = nullptr;
 	FTimerHandle DebugHUDTimerHandle;
 
 	UPROPERTY()

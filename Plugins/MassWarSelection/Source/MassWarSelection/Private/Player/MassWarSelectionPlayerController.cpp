@@ -5,6 +5,7 @@
 #include "Selection/MassWarSelectionSubsystem.h"
 #include "Registry/MassWarUnitRegistrySubsystem.h"
 #include "Fragments/MassWarUnitFragments.h"
+#include "UnitBrain/MassWarUnitStateView.h"
 #include "MassSpawnerSubsystem.h"
 #include "MassEntityManager.h"
 #include "MassCommonFragments.h"
@@ -85,7 +86,7 @@ void AMassWarSelectionPlayerController::OnLeftClickReleased()
 	{
 		const FVector2D Min(FMath::Min(DragStartScreenPos.X, CurrentScreenPos.X), FMath::Min(DragStartScreenPos.Y, CurrentScreenPos.Y));
 		const FVector2D Max(FMath::Max(DragStartScreenPos.X, CurrentScreenPos.X), FMath::Max(DragStartScreenPos.Y, CurrentScreenPos.Y));
-		SelectionSubsystem->SetSelection(FindUnitsInScreenRect(Min, Max, /*bOwnedOnly=*/true));
+		SelectionSubsystem->SetSelection(ExpandToFormations(FindUnitsInScreenRect(Min, Max, /*bOwnedOnly=*/true)));
 	}
 	else
 	{
@@ -99,7 +100,7 @@ void AMassWarSelectionPlayerController::OnLeftClickReleased()
 			{
 				TArray<FMassEntityHandle> Single;
 				Single.Add(Clicked);
-				SelectionSubsystem->SetSelection(Single);
+				SelectionSubsystem->SetSelection(ExpandToFormations(Single));
 				bSelected = true;
 			}
 		}
@@ -141,7 +142,28 @@ void AMassWarSelectionPlayerController::OnRightClickPressed()
 		const FMassWarTeamFragment* Team = EntityManager->GetFragmentDataPtr<FMassWarTeamFragment>(Target);
 		if (Team && Team->TeamId != PlayerTeamId && Team->TeamId != 0)
 		{
-			OrderComponent->ServerIssueAttackOrder(MakeOrderTargets(*EntityManager, SelectionSubsystem->GetSelection()), MakeOrderTarget(*EntityManager, Target));
+			TArray<int32> FormationIds;
+			TArray<FMassEntityHandle> Unformed;
+			CollectFormationIds(SelectionSubsystem->GetSelection(), FormationIds, Unformed);
+
+			// Attacking a unit that is in a formation means attacking that formation - ours then assigns the
+			// targets. A lone enemy unit (no formation) is attacked directly by every selected unit, as before.
+			const FMassWarFormationMemberFragment* TargetFormation = EntityManager->GetFragmentDataPtr<FMassWarFormationMemberFragment>(Target);
+			if (TargetFormation && TargetFormation->FormationId != 0)
+			{
+				if (!FormationIds.IsEmpty())
+				{
+					OrderComponent->ServerIssueFormationAttackOrder(FormationIds, static_cast<int32>(TargetFormation->FormationId));
+				}
+				if (!Unformed.IsEmpty())
+				{
+					OrderComponent->ServerIssueAttackOrder(MakeOrderTargets(*EntityManager, Unformed), MakeOrderTarget(*EntityManager, Target));
+				}
+			}
+			else
+			{
+				OrderComponent->ServerIssueAttackOrder(MakeOrderTargets(*EntityManager, SelectionSubsystem->GetSelection()), MakeOrderTarget(*EntityManager, Target));
+			}
 			return;
 		}
 	}
@@ -156,7 +178,76 @@ void AMassWarSelectionPlayerController::OnRightClickPressed()
 	const FVector TraceEnd = WorldLocation + WorldDirection * 100000.f;
 	if (GetWorld()->LineTraceSingleByChannel(Hit, WorldLocation, TraceEnd, ECC_Visibility))
 	{
-		OrderComponent->ServerIssueMoveOrder(MakeOrderTargets(*EntityManager, SelectionSubsystem->GetSelection()), Hit.Location);
+		TArray<int32> FormationIds;
+		TArray<FMassEntityHandle> Unformed;
+		CollectFormationIds(SelectionSubsystem->GetSelection(), FormationIds, Unformed);
+		if (!FormationIds.IsEmpty())
+		{
+			OrderComponent->ServerIssueFormationMoveOrder(FormationIds, Hit.Location);
+		}
+		if (!Unformed.IsEmpty())
+		{
+			OrderComponent->ServerIssueMoveOrder(MakeOrderTargets(*EntityManager, Unformed), Hit.Location);
+		}
+	}
+}
+
+TArray<FMassEntityHandle> AMassWarSelectionPlayerController::ExpandToFormations(const TArray<FMassEntityHandle>& Units) const
+{
+	FMassEntityManager* EntityManager = GetEntityManager();
+	UMassWarUnitRegistrySubsystem* Registry = GetWorld() ? GetWorld()->GetSubsystem<UMassWarUnitRegistrySubsystem>() : nullptr;
+	if (!EntityManager || !Registry)
+	{
+		return Units;
+	}
+
+	TArray<int32> FormationIds;
+	TArray<FMassEntityHandle> Unformed;
+	CollectFormationIds(Units, FormationIds, Unformed);
+	if (FormationIds.IsEmpty())
+	{
+		return Units;
+	}
+
+	TArray<FMassEntityHandle> Result = Unformed;
+	for (const FMassEntityHandle& Entity : Registry->GetAllUnits())
+	{
+		if (!FMassWarUnitStateView::IsLiving(*EntityManager, Entity))
+		{
+			continue;
+		}
+		const FMassWarFormationMemberFragment* Member = EntityManager->GetFragmentDataPtr<FMassWarFormationMemberFragment>(Entity);
+		const FMassWarOwnerFragment* OwnerFragment = EntityManager->GetFragmentDataPtr<FMassWarOwnerFragment>(Entity);
+		if (Member && OwnerFragment && OwnerFragment->OwningPlayerId == PlayerId && FormationIds.Contains(static_cast<int32>(Member->FormationId)))
+		{
+			Result.Add(Entity);
+		}
+	}
+	return Result;
+}
+
+void AMassWarSelectionPlayerController::CollectFormationIds(const TArray<FMassEntityHandle>& Units, TArray<int32>& OutFormationIds, TArray<FMassEntityHandle>& OutUnformedUnits) const
+{
+	FMassEntityManager* EntityManager = GetEntityManager();
+	if (!EntityManager)
+	{
+		return;
+	}
+	for (const FMassEntityHandle& Unit : Units)
+	{
+		if (!FMassWarUnitStateView::IsLiving(*EntityManager, Unit))
+		{
+			continue;
+		}
+		const FMassWarFormationMemberFragment* Member = EntityManager->GetFragmentDataPtr<FMassWarFormationMemberFragment>(Unit);
+		if (Member && Member->FormationId != 0)
+		{
+			OutFormationIds.AddUnique(static_cast<int32>(Member->FormationId));
+		}
+		else
+		{
+			OutUnformedUnits.Add(Unit);
+		}
 	}
 }
 
@@ -210,7 +301,7 @@ TArray<FMassEntityHandle> AMassWarSelectionPlayerController::FindUnitsInScreenRe
 
 	for (const FMassEntityHandle& Entity : Registry->GetAllUnits())
 	{
-		if (!EntityManager->IsEntityValid(Entity))
+		if (!FMassWarUnitStateView::IsLiving(*EntityManager, Entity))
 		{
 			continue;
 		}
@@ -260,7 +351,7 @@ FMassEntityHandle AMassWarSelectionPlayerController::FindNearestUnitAtScreenPos(
 
 	for (const FMassEntityHandle& Entity : Registry->GetAllUnits())
 	{
-		if (!EntityManager->IsEntityValid(Entity))
+		if (!FMassWarUnitStateView::IsLiving(*EntityManager, Entity))
 		{
 			continue;
 		}
