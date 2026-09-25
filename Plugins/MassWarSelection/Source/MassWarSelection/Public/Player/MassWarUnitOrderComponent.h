@@ -30,6 +30,15 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerIssueAttackOrder(const TArray<FMassWarOrderTarget>& Entities, FMassWarOrderTarget Target);
 
+	/** Move order for whole formations (the normal case: selection is by formation). Only ids travel over the
+	 *  network - the server owns the formations and checks that the calling player owns each one. */
+	UFUNCTION(Server, Reliable)
+	void ServerIssueFormationMoveOrder(const TArray<int32>& FormationIds, FVector Destination);
+
+	/** Attack order for whole formations against an enemy formation (each member is given its own target). */
+	UFUNCTION(Server, Reliable)
+	void ServerIssueFormationAttackOrder(const TArray<int32>& FormationIds, int32 TargetFormationId);
+
 private:
 	/** Trusts Handle only for a local (listen-server host) connection; NetId otherwise - see class comment. Invalid handle if it can't resolve. */
 	FMassEntityHandle ResolveTarget(FMassEntityManager& EntityManager, const FMassWarOrderTarget& Target) const;

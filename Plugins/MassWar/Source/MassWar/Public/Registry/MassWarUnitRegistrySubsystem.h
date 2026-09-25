@@ -10,20 +10,10 @@
 struct FMassEntityManager;
 
 /**
- * Optional "please deal damage" hook, exposed by Core so an optional plugin with no combat math of its
- * own (MassWarEmbodiment's hero, which doesn't depend on MassWarCombat) can still damage a Mass entity
- * target - MassWarCombat's damage processor binds this once per world, Core never knows MassWarCombat
- * exists. Same "expose here, bind there" shape as MassWarReplication's OnFilterRelevancy. Returns true
- * if damage was actually applied (false if MassWarCombat isn't installed, or Target has no health).
- */
-DECLARE_DELEGATE_RetVal_ThreeParams(bool, FMassWarDealDamageDelegate, FMassEntityHandle /*Target*/, float /*Damage*/, FMassEntityHandle /*Instigator*/);
-
-/**
- * Lightweight registry of every MassWar unit spawned in this world - both ordinary Mass entities and
- * (MassWarEmbodiment) standalone Actor units. Exists so gameplay code that isn't a Mass processor
- * (selection hit-testing, debug tooling, AI target-finding) has a way to enumerate units without
- * needing an ad-hoc FMassEntityQuery. Entries aren't automatically pruned when a unit dies - callers
- * should check validity themselves (FMassEntityManager::IsEntityValid / TWeakObjectPtr::IsValid).
+ * Lightweight registry of every MassWar unit spawned in this world. Exists so gameplay code that isn't a
+ * Mass processor (selection hit-testing, debug tooling, AI target-finding) has a way to enumerate units
+ * without needing an ad-hoc FMassEntityQuery. Entries aren't automatically pruned when a unit dies -
+ * callers should check validity themselves (FMassEntityManager::IsEntityValid).
  */
 UCLASS()
 class MASSWAR_API UMassWarUnitRegistrySubsystem : public UWorldSubsystem
@@ -34,13 +24,9 @@ public:
 	void RegisterUnit(FMassEntityHandle Entity);
 	void UnregisterUnit(FMassEntityHandle Entity);
 
-	/** MassWarEmbodiment-only in practice, but Core doesn't need to know that to host the list. */
-	void RegisterActorUnit(AActor* Actor);
-	void UnregisterActorUnit(AActor* Actor);
-
 	const TArray<FMassEntityHandle>& GetAllUnits() const { return Units; }
 
-	/** Every known unit, Mass entities and Actor units combined - see FMassWarUnitHandle. */
+	/** Every known unit as a FMassWarUnitHandle (the form StateTree nodes and FMassWarUnitStateView use). */
 	TArray<FMassWarUnitHandle> GetAllUnitHandles() const;
 
 	/**
@@ -53,13 +39,7 @@ public:
 	 */
 	FMassEntityHandle FindByNetId(const FMassEntityManager& EntityManager, uint32 NetId) const;
 
-	/** Bind via GetWorld()->GetSubsystem<UMassWarUnitRegistrySubsystem>()->OnDealDamage.BindUObject(...). */
-	FMassWarDealDamageDelegate OnDealDamage;
-
 private:
 	UPROPERTY()
 	TArray<FMassEntityHandle> Units;
-
-	UPROPERTY()
-	TArray<TWeakObjectPtr<AActor>> ActorUnits;
 };

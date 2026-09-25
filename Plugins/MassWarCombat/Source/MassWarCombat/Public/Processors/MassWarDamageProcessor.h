@@ -26,15 +26,7 @@ public:
 
 protected:
 	virtual void ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager) override;
-	virtual void InitializeInternal(UObject& Owner, const TSharedRef<FMassEntityManager>& EntityManager) override;
 	virtual void Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context) override;
 
 	FMassEntityQuery EntityQuery;
-
-private:
-	/** Bound to UMassWarUnitRegistrySubsystem::OnDealDamage - lets an optional plugin with no combat math
-	 *  of its own (MassWarEmbodiment's hero) still damage a Mass entity target. */
-	bool HandleDealDamage(FMassEntityHandle Target, float Damage, FMassEntityHandle Instigator);
-
-	TSharedPtr<FMassEntityManager> CachedEntityManager;
 };
