@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "MassWarEmbodiment",
-	"Description": "Optional MassWar feature plugin: full-Actor unit embodiment (a hero Character driven by the same StateTree decision logic as Mass units) and a cosmetic near-LOD Character puppet for ordinary Mass units.",
+	"Description": "Optional MassWar feature plugin: cosmetic near-LOD Actor puppets for ordinary Mass units. The Mass entity stays the single source of truth; the game supplies the Actor class and this plugin keeps it in sync with its entity.",
 	"Category": "MassWar",
 	"CreatedBy": "ArturToJa",
 	"CreatedByURL": "",
@@ -24,18 +24,6 @@
 	"Plugins": [
 		{
 			"Name": "MassWar",
-			"Enabled": true
-		},
-		{
-			"Name": "MassWarStateTreeAI",
-			"Enabled": true
-		},
-		{
-			"Name": "GameplayStateTree",
-			"Enabled": true
-		},
-		{
-			"Name": "StateTree",
 			"Enabled": true
 		},
 		{

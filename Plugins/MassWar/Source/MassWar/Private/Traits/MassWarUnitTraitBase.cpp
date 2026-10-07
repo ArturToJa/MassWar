@@ -22,10 +22,31 @@ void UMassWarUnitTraitBase::BuildTemplate(FMassEntityTemplateBuildContext& Build
 	Team.TeamId = DefaultTeamId;
 
 	BuildContext.AddFragment<FMassWarOrderFragment>();
+
+	FMassWarLifeFragment& Life = BuildContext.AddFragment_GetRef<FMassWarLifeFragment>();
+	Life.LingerTime = DeathLingerTime;
+
+	BuildContext.AddFragment<FMassWarAttackFeedbackFragment>();
+
+	if (bUseNavMesh)
+	{
+		FMassWarNavPathFragment& Nav = BuildContext.AddFragment_GetRef<FMassWarNavPathFragment>();
+		Nav.RepathInterval = NavRepathInterval;
+		Nav.RepathDistance = NavRepathDistance;
+	}
+	if (bAvoidOtherUnits)
+	{
+		FMassWarAvoidanceFragment& Avoidance = BuildContext.AddFragment_GetRef<FMassWarAvoidanceFragment>();
+		Avoidance.Radius = AvoidanceRadius;
+		Avoidance.Strength = AvoidanceStrength;
+	}
+	BuildContext.AddFragment<FMassWarFormationMemberFragment>();
 	BuildContext.AddFragment<FMassWarNetIdFragment>();
 	BuildContext.AddFragment<FMassWarOwnerFragment>();
 
 	FMassWarMovementParamsFragment& MovementParams = BuildContext.AddFragment_GetRef<FMassWarMovementParamsFragment>();
 	MovementParams.MoveSpeed = MoveSpeed;
 	MovementParams.AcceptanceRadius = AcceptanceRadius;
+	MovementParams.AttackStopDistance = AttackStopDistance;
+	MovementParams.TurnRate = TurnRate;
 }

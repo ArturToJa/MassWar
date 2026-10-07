@@ -6,10 +6,14 @@
 #include "MassEntityManager.h"
 #include "MassCommonFragments.h"
 #include "MassRepresentationFragments.h"
+#include "MassVisualizationTrait.h"
 #include "MassActorSubsystem.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "Fragments/MassWarCombatFragments.h"
 #include "Registry/MassWarUnitRegistrySubsystem.h"
+#include "UnitBrain/MassWarUnitStateView.h"
+#include "Traits/MassWarUnitTraitBase.h"
+#include "Traits/MassWarCombatTrait.h"
 #include "UObject/SoftObjectPath.h"
 #include "TimerManager.h"
 #include "HAL/IConsoleManager.h"
@@ -17,9 +21,7 @@
 #include "Player/MassWarRTSCameraPawn.h"
 #include "Player/MassWarSelectionPlayerController.h"
 #include "UI/MassWarHUD.h"
-#include "Characters/MassWarUnitCharacter.h"
-#include "Controllers/MassWarUnitAIController.h"
-#include "UnitBrain/MassWarUnitStateComponent.h"
+#include "Formation/MassWarFormationSubsystem.h"
 
 AMassWarDemoGameMode::AMassWarDemoGameMode()
 {
@@ -28,7 +30,6 @@ AMassWarDemoGameMode::AMassWarDemoGameMode()
 	PlayerControllerClass = AMassWarSelectionPlayerController::StaticClass();
 	DefaultPawnClass = AMassWarRTSCameraPawn::StaticClass();
 	HUDClass = AMassWarHUD::StaticClass();
-	HeroCharacterClass = AMassWarUnitCharacter::StaticClass();
 }
 
 void AMassWarDemoGameMode::BeginPlay()
@@ -57,6 +58,15 @@ void AMassWarDemoGameMode::BeginPlay()
 			ECVF_Default);
 	}
 
+	if (!DebugFocusConsoleCommand)
+	{
+		DebugFocusConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+			TEXT("MassWar.DebugFocusUnits"),
+			TEXT("Test harness: teleports the camera pawn above the first unit. Optional arg: height in units (default 600)."),
+			FConsoleCommandWithArgsDelegate::CreateUObject(this, &AMassWarDemoGameMode::DebugFocusCameraOnUnits),
+			ECVF_Default);
+	}
+
 	GetWorldTimerManager().SetTimer(DebugHUDTimerHandle, this, &AMassWarDemoGameMode::UpdateDebugHUD, 0.5f, true);
 }
 
@@ -72,6 +82,12 @@ void AMassWarDemoGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(DebugMoveConsoleCommand);
 		DebugMoveConsoleCommand = nullptr;
+	}
+
+	if (DebugFocusConsoleCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(DebugFocusConsoleCommand);
+		DebugFocusConsoleCommand = nullptr;
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -127,11 +143,6 @@ void AMassWarDemoGameMode::HandleStartingNewPlayer_Implementation(APlayerControl
 		{
 			const FVector Origin = ComputeSpawnOriginForPlayer(PlayerIndex);
 			SpawnUnitsForPlayer(*Config, PlayerId, TeamId, Origin, UnitsPerPlayer);
-
-			if (PlayerIndex == 1)
-			{
-				SpawnHeroForPlayer(TeamId, PlayerId, Origin);
-			}
 		}
 	}
 
@@ -159,6 +170,7 @@ void AMassWarDemoGameMode::SpawnUnitsForPlayer(UMassEntityConfigAsset& Config, u
 		return;
 	}
 
+	int32 UnitIndex = 0;
 	const FMassEntityTemplate& Template = Config.GetOrCreateEntityTemplate(*World);
 
 	TArray<FMassEntityHandle> SpawnedEntities;
@@ -187,11 +199,14 @@ void AMassWarDemoGameMode::SpawnUnitsForPlayer(UMassEntityConfigAsset& Config, u
 
 		if (FTransformFragment* Transform = EntityManager.GetFragmentDataPtr<FTransformFragment>(Entity))
 		{
-			const FVector RandomOffset(
-				FMath::FRandRange(-SpawnAreaExtent, SpawnAreaExtent),
-				FMath::FRandRange(-SpawnAreaExtent, SpawnAreaExtent),
-				0.f);
-			Transform->SetTransform(FTransform(Origin + RandomOffset));
+			// Each formation spawns as its own cluster, side by side along Y, so the groups start out recognisable.
+			const int32 PerFormation = FMath::Max(1, UnitsPerFormation);
+			const int32 FormationIndex = UnitIndex / PerFormation;
+			const int32 FormationCount = FMath::DivideAndRoundUp(Count, PerFormation);
+			const float ClusterSpacing = 2.f * SpawnAreaExtent / FMath::Max(1, FormationCount);
+			const FVector ClusterCentre(0.f, (FormationIndex - (FormationCount - 1) * 0.5f) * ClusterSpacing, 0.f);
+			const FVector RandomOffset(FMath::FRandRange(-350.f, 350.f), FMath::FRandRange(-350.f, 350.f), 0.f);
+			Transform->SetTransform(FTransform(Origin + ClusterCentre + RandomOffset));
 		}
 
 		if (DebugSampleEntities.Num() < 5)
@@ -200,48 +215,21 @@ void AMassWarDemoGameMode::SpawnUnitsForPlayer(UMassEntityConfigAsset& Config, u
 		}
 
 		TeamEntities.Add(Entity);
+		++UnitIndex;
+	}
+
+	// Group the new units into formations of UnitsPerFormation; a formation is what the player selects and orders.
+	if (UMassWarFormationSubsystem* Formations = World->GetSubsystem<UMassWarFormationSubsystem>())
+	{
+		const int32 PerFormation = FMath::Max(1, UnitsPerFormation);
+		for (int32 Start = 0; Start < SpawnedEntities.Num(); Start += PerFormation)
+		{
+			const int32 Num = FMath::Min(PerFormation, SpawnedEntities.Num() - Start);
+			Formations->CreateFormation(EntityManager, TConstArrayView<FMassEntityHandle>(SpawnedEntities.GetData() + Start, Num), PlayerId, FormationSettings);
+		}
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("MassWarDemoGameMode: spawned %d units for player %u (team %d)"), SpawnedEntities.Num(), PlayerId, TeamId);
-}
-
-void AMassWarDemoGameMode::SpawnHeroForPlayer(uint8 TeamId, uint32 PlayerId, const FVector& Origin)
-{
-	if (bHeroSpawned || !HeroCharacterClass)
-	{
-		return;
-	}
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return;
-	}
-
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-	const FVector SpawnLocation = Origin + FVector(0.f, 0.f, 100.f);
-	APawn* HeroPawn = World->SpawnActor<APawn>(HeroCharacterClass, SpawnLocation, FRotator::ZeroRotator, SpawnParams);
-	if (!HeroPawn)
-	{
-		UE_LOG(LogTemp, Error, TEXT("MassWarDemoGameMode: failed to spawn hero for player %u"), PlayerId);
-		return;
-	}
-
-	AMassWarUnitAIController* HeroController = Cast<AMassWarUnitAIController>(HeroPawn->GetController());
-	if (UMassWarUnitStateComponent* StateComponent = HeroController ? HeroController->GetStateComponent() : nullptr)
-	{
-		StateComponent->TeamId = TeamId;
-		StateComponent->OwningPlayerId = PlayerId;
-	}
-	else
-	{
-		UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode: hero for player %u has no AMassWarUnitAIController/UMassWarUnitStateComponent yet (not possessed at spawn time?) - team/owner not set"), PlayerId);
-	}
-
-	bHeroSpawned = true;
-	UE_LOG(LogTemp, Log, TEXT("MassWarDemoGameMode: spawned hero for player %u (team %d) at %s"), PlayerId, TeamId, *SpawnLocation.ToString());
 }
 
 void AMassWarDemoGameMode::DebugAttackNearestEnemy()
@@ -356,7 +344,7 @@ void AMassWarDemoGameMode::DebugMoveFirstTeamTowardOthers()
 	int32 OrdersIssued = 0;
 	for (const FMassEntityHandle& Entity : EntitiesByTeam[SourceTeamId])
 	{
-		if (!EntityManager.IsEntityValid(Entity))
+		if (!FMassWarUnitStateView::IsLiving(EntityManager, Entity))
 		{
 			continue;
 		}
@@ -365,6 +353,7 @@ void AMassWarDemoGameMode::DebugMoveFirstTeamTowardOthers()
 		{
 			Order->OrderType = EMassWarOrderType::Move;
 			Order->Destination = Destination;
+			Order->bStopAtAttackDistance = false;
 			Order->TargetEntity.Reset();
 			++OrdersIssued;
 		}
@@ -384,6 +373,7 @@ void AMassWarDemoGameMode::UpdateDebugHUD()
 
 	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
 
+
 	TArray<uint8> TeamIds;
 	EntitiesByTeam.GetKeys(TeamIds);
 	TeamIds.Sort();
@@ -395,7 +385,7 @@ void AMassWarDemoGameMode::UpdateDebugHUD()
 		int32 Alive = 0;
 		for (const FMassEntityHandle& Entity : Entities)
 		{
-			if (EntityManager.IsEntityValid(Entity))
+			if (FMassWarUnitStateView::IsLiving(EntityManager, Entity))
 			{
 				++Alive;
 			}
@@ -404,6 +394,87 @@ void AMassWarDemoGameMode::UpdateDebugHUD()
 	}
 
 	GEngine->AddOnScreenDebugMessage(/*Key=*/ 100, /*TimeToDisplay=*/ 1.f, FColor::Yellow, Message);
+
+	// Second line: how the units are currently being shown, and how close the camera is to the nearest one -
+	// the near-LOD Actor swap only happens inside the visualization trait's LOD distance (see
+	// FMassVisualizationLODParameters::BaseLODDistance / VisibleLODDistance on the unit config).
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation;
+	const APlayerController* LocalPC = GetWorld()->GetFirstPlayerController();
+	if (LocalPC)
+	{
+		LocalPC->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
+
+	int32 ActorCount = 0, InstanceCount = 0, OffCount = 0;
+	float NearestDistSq = TNumericLimits<float>::Max();
+	for (const TPair<uint8, TArray<FMassEntityHandle>>& TeamPair : EntitiesByTeam)
+	{
+		for (const FMassEntityHandle& Entity : TeamPair.Value)
+		{
+			if (!FMassWarUnitStateView::IsLiving(EntityManager, Entity))
+			{
+				continue;
+			}
+
+			if (const FMassRepresentationFragment* Rep = EntityManager.GetFragmentDataPtr<FMassRepresentationFragment>(Entity))
+			{
+				switch (Rep->CurrentRepresentation)
+				{
+				case EMassRepresentationType::HighResSpawnedActor:
+				case EMassRepresentationType::LowResSpawnedActor:
+					++ActorCount;
+					break;
+				case EMassRepresentationType::StaticMeshInstance:
+					++InstanceCount;
+					break;
+				default:
+					++OffCount;
+					break;
+				}
+			}
+
+			if (const FTransformFragment* Transform = EntityManager.GetFragmentDataPtr<FTransformFragment>(Entity))
+			{
+				NearestDistSq = FMath::Min(NearestDistSq, FVector::DistSquared(ViewLocation, Transform->GetTransform().GetLocation()));
+			}
+		}
+	}
+
+	const FString RepresentationMessage = FString::Printf(TEXT("Representation: %d actor / %d ISM / %d off    nearest unit to camera: %.0f uu   (console: MassWar.DebugFocusUnits)"),
+		ActorCount, InstanceCount, OffCount, NearestDistSq < TNumericLimits<float>::Max() ? FMath::Sqrt(NearestDistSq) : -1.f);
+	GEngine->AddOnScreenDebugMessage(/*Key=*/ 101, /*TimeToDisplay=*/ 1.f, FColor::Cyan, RepresentationMessage);
+	UE_LOG(LogTemp, Verbose, TEXT("MassWarDemoGameMode HUD: %s"), *RepresentationMessage);}
+
+void AMassWarDemoGameMode::DebugFocusCameraOnUnits(const TArray<FString>& Args)
+{
+	UMassSpawnerSubsystem* Spawner = GetWorld() ? GetWorld()->GetSubsystem<UMassSpawnerSubsystem>() : nullptr;
+	APawn* Pawn = GetWorld() && GetWorld()->GetFirstPlayerController() ? GetWorld()->GetFirstPlayerController()->GetPawn() : nullptr;
+	if (!Spawner || !Pawn)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode: DebugFocusUnits needs spawned units and a possessed camera pawn"));
+		return;
+	}
+
+	const float Height = Args.Num() > 0 ? FCString::Atof(*Args[0]) : 600.f;
+
+	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
+	for (const TPair<uint8, TArray<FMassEntityHandle>>& TeamPair : EntitiesByTeam)
+	{
+		for (const FMassEntityHandle& Entity : TeamPair.Value)
+		{
+			const FTransformFragment* Transform = EntityManager.IsEntityValid(Entity) ? EntityManager.GetFragmentDataPtr<FTransformFragment>(Entity) : nullptr;
+			if (Transform)
+			{
+				const FVector Target = Transform->GetTransform().GetLocation();
+				Pawn->SetActorLocation(FVector(Target.X, Target.Y, Target.Z + Height));
+				UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode: DebugFocusUnits moved camera to %s"), *Pawn->GetActorLocation().ToString());
+				return;
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode: DebugFocusUnits found no living unit to focus on"));
 }
 
 void AMassWarDemoGameMode::LogEntityDiagnostics()
@@ -415,6 +486,40 @@ void AMassWarDemoGameMode::LogEntityDiagnostics()
 	}
 
 	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
+
+	// What the unit config's visualization trait actually says (as saved in the asset) - the values that
+	// decide whether/when a unit becomes a near-LOD Actor instead of an ISM instance.
+	if (const UMassVisualizationTrait* VisTrait = Cast<UMassVisualizationTrait>(GetOrLoadDemoUnitConfig() ? GetOrLoadDemoUnitConfig()->FindTrait(UMassVisualizationTrait::StaticClass()) : nullptr))
+	{
+		const FMassRepresentationParameters& Params = VisTrait->Params;
+		const FMassVisualizationLODParameters& LOD = VisTrait->LODParams;
+		UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode DIAGNOSTICS: visualization trait %s: HighResTemplateActor=%s LowResTemplateActor=%s LODRepresentation[High,Med,Low,Off]=[%s, %s, %s, %s] BaseLODDistance=[%.0f, %.0f, %.0f, %.0f] VisibleLODDistance=[%.0f, %.0f, %.0f, %.0f] LODMaxCount=[%d, %d, %d, %d]"),
+			*VisTrait->GetClass()->GetName(),
+			*GetNameSafe(VisTrait->HighResTemplateActor.Get()),
+			*GetNameSafe(VisTrait->LowResTemplateActor.Get()),
+			*UEnum::GetValueAsString(Params.LODRepresentation[EMassLOD::High]),
+			*UEnum::GetValueAsString(Params.LODRepresentation[EMassLOD::Medium]),
+			*UEnum::GetValueAsString(Params.LODRepresentation[EMassLOD::Low]),
+			*UEnum::GetValueAsString(Params.LODRepresentation[EMassLOD::Off]),
+			LOD.BaseLODDistance[0], LOD.BaseLODDistance[1], LOD.BaseLODDistance[2], LOD.BaseLODDistance[3],
+			LOD.VisibleLODDistance[0], LOD.VisibleLODDistance[1], LOD.VisibleLODDistance[2], LOD.VisibleLODDistance[3],
+			LOD.LODMaxCount[0], LOD.LODMaxCount[1], LOD.LODMaxCount[2], LOD.LODMaxCount[3]);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode DIAGNOSTICS: unit config has NO visualization trait"));
+	}
+
+	// The movement / combat distances as saved in the unit config - the values that decide how close units get.
+	if (UMassEntityConfigAsset* Config = GetOrLoadDemoUnitConfig())
+	{
+		const UMassWarUnitTraitBase* UnitTrait = Cast<UMassWarUnitTraitBase>(Config->FindTrait(UMassWarUnitTraitBase::StaticClass()));
+		const UMassWarCombatTrait* CombatTrait = Cast<UMassWarCombatTrait>(Config->FindTrait(UMassWarCombatTrait::StaticClass()));
+		UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode DIAGNOSTICS: distances: MoveSpeed=%.0f AcceptanceRadius(Move)=%.0f AttackStopDistance=%.0f | Combat AttackRange=%.0f"),
+			UnitTrait ? UnitTrait->MoveSpeed : -1.f, UnitTrait ? UnitTrait->AcceptanceRadius : -1.f, UnitTrait ? UnitTrait->AttackStopDistance : -1.f,
+			CombatTrait ? CombatTrait->AttackRange : -1.f);
+	}
+
 	UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode DIAGNOSTICS: dumping %d sample entities"), DebugSampleEntities.Num());
 
 	for (const FMassEntityHandle& Entity : DebugSampleEntities)

@@ -14,35 +14,14 @@ void UMassWarUnitRegistrySubsystem::UnregisterUnit(FMassEntityHandle Entity)
 	Units.RemoveSingleSwap(Entity);
 }
 
-void UMassWarUnitRegistrySubsystem::RegisterActorUnit(AActor* Actor)
-{
-	if (Actor)
-	{
-		ActorUnits.AddUnique(Actor);
-	}
-}
-
-void UMassWarUnitRegistrySubsystem::UnregisterActorUnit(AActor* Actor)
-{
-	ActorUnits.RemoveSingleSwap(Actor);
-}
-
 TArray<FMassWarUnitHandle> UMassWarUnitRegistrySubsystem::GetAllUnitHandles() const
 {
 	TArray<FMassWarUnitHandle> Handles;
-	Handles.Reserve(Units.Num() + ActorUnits.Num());
+	Handles.Reserve(Units.Num());
 
 	for (const FMassEntityHandle& Entity : Units)
 	{
 		Handles.Add(FMassWarUnitHandle(Entity));
-	}
-
-	for (const TWeakObjectPtr<AActor>& Actor : ActorUnits)
-	{
-		if (AActor* ActorPtr = Actor.Get())
-		{
-			Handles.Add(FMassWarUnitHandle(ActorPtr));
-		}
 	}
 
 	return Handles;

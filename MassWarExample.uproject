@@ -8,6 +8,11 @@
 			"Name": "MassWarExample",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "MassWarExampleEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -33,6 +38,14 @@
 		},
 		{
 			"Name": "MassWarFogOfWar",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarFormations",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarPerception",
 			"Enabled": true
 		},
 		{
@@ -76,6 +89,10 @@
 		},
 		{
 			"Name": "StateTree",
+			"Enabled": true
+		},
+		{
+			"Name": "AnimToTexture",
 			"Enabled": true
 		}
 	]

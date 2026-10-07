@@ -28,7 +28,7 @@ EStateTreeRunStatus FMassWarSTTask_MoveTo::EnterState(FStateTreeExecutionContext
 	const FMassStateTreeExecutionContext& MassContext = static_cast<FMassStateTreeExecutionContext&>(Context);
 
 	const FMassWarUnitStateView SelfView(MassContext.GetEntityManager(), MassContext.GetEntity());
-	SelfView.RequestMoveTo(InstanceData.Destination);
+	SelfView.RequestMoveTo(InstanceData.Destination, InstanceData.bStopAtAttackDistance);
 
 	return EStateTreeRunStatus::Running;
 }
