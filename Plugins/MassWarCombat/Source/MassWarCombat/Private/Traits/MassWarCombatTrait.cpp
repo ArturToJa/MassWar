@@ -14,5 +14,6 @@ void UMassWarCombatTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildCo
 	Combat.AttackDamage = AttackDamage;
 	Combat.AttackRange = AttackRange;
 	Combat.AttackInterval = AttackInterval;
+	Combat.AttackNoiseRange = AttackNoiseRange;
 	Combat.TimeSinceLastAttack = AttackInterval;
 }

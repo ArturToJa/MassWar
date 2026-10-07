@@ -14,6 +14,13 @@ struct FMassWarSTTask_MoveToInstanceData
 
 	UPROPERTY(EditAnywhere, Category = Input)
 	FVector Destination = FVector::ZeroVector;
+
+	/** True: the move is done once the unit is within its AttackStopDistance of Destination - right for an
+	 *  approach-to-engage move toward an enemy, where getting into fighting range is enough. False: the
+	 *  unit must actually arrive (within its small Move AcceptanceRadius). Defaults to true so trees built
+	 *  before this option existed keep their units at fighting distance instead of running onto the enemy. */
+	UPROPERTY(EditAnywhere, Category = Parameter)
+	bool bStopAtAttackDistance = true;
 };
 
 /**

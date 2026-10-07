@@ -5,9 +5,12 @@
 #include "MassSpawnerSubsystem.h"
 #include "MassEntityManager.h"
 #include "Fragments/MassWarUnitFragments.h"
+#include "UnitBrain/MassWarUnitStateView.h"
 #include "Registry/MassWarUnitRegistrySubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/NetConnection.h"
+#include "Formation/MassWarFormationSubsystem.h"
+#include "MassEntityUtils.h"
 
 UMassWarUnitOrderComponent::UMassWarUnitOrderComponent()
 {
@@ -59,7 +62,7 @@ void UMassWarUnitOrderComponent::ServerIssueMoveOrder_Implementation(const TArra
 	for (const FMassWarOrderTarget& OrderTarget : Entities)
 	{
 		const FMassEntityHandle Entity = ResolveTarget(EntityManager, OrderTarget);
-		if (!EntityManager.IsEntityValid(Entity) || !IsOwnedByCallingPlayer(EntityManager, Entity))
+		if (!FMassWarUnitStateView::IsLiving(EntityManager, Entity) || !IsOwnedByCallingPlayer(EntityManager, Entity))
 		{
 			continue;
 		}
@@ -69,6 +72,7 @@ void UMassWarUnitOrderComponent::ServerIssueMoveOrder_Implementation(const TArra
 			Order->OrderType = EMassWarOrderType::Move;
 			Order->Destination = Destination;
 			Order->TargetEntity.Reset();
+			Order->bStopAtAttackDistance = false; // a click order finishes where you clicked
 			Order->bPlayerCommanded = true;
 		}
 	}
@@ -84,7 +88,7 @@ void UMassWarUnitOrderComponent::ServerIssueAttackOrder_Implementation(const TAr
 
 	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
 	const FMassEntityHandle TargetEntity = ResolveTarget(EntityManager, Target);
-	if (!EntityManager.IsEntityValid(TargetEntity))
+	if (!FMassWarUnitStateView::IsLiving(EntityManager, TargetEntity))
 	{
 		return;
 	}
@@ -92,7 +96,7 @@ void UMassWarUnitOrderComponent::ServerIssueAttackOrder_Implementation(const TAr
 	for (const FMassWarOrderTarget& OrderTarget : Entities)
 	{
 		const FMassEntityHandle Entity = ResolveTarget(EntityManager, OrderTarget);
-		if (!EntityManager.IsEntityValid(Entity) || Entity == TargetEntity || !IsOwnedByCallingPlayer(EntityManager, Entity))
+		if (!FMassWarUnitStateView::IsLiving(EntityManager, Entity) || Entity == TargetEntity || !IsOwnedByCallingPlayer(EntityManager, Entity))
 		{
 			continue;
 		}
@@ -104,4 +108,42 @@ void UMassWarUnitOrderComponent::ServerIssueAttackOrder_Implementation(const TAr
 			Order->bPlayerCommanded = true;
 		}
 	}
+}
+
+void UMassWarUnitOrderComponent::ServerIssueFormationMoveOrder_Implementation(const TArray<int32>& FormationIds, FVector Destination)
+{
+	UWorld* World = GetWorld();
+	UMassWarFormationSubsystem* Formations = World ? World->GetSubsystem<UMassWarFormationSubsystem>() : nullptr;
+	const AMassWarSelectionPlayerController* OwningController = GetOwner<AMassWarSelectionPlayerController>();
+	if (!Formations || !OwningController)
+	{
+		return;
+	}
+
+	TArray<uint32> Ids;
+	Ids.Reserve(FormationIds.Num());
+	for (const int32 Id : FormationIds)
+	{
+		Ids.Add(static_cast<uint32>(Id));
+	}
+	Formations->IssueMoveOrder(UE::Mass::Utils::GetEntityManagerChecked(*World), Ids, Destination, OwningController->GetPlayerId());
+}
+
+void UMassWarUnitOrderComponent::ServerIssueFormationAttackOrder_Implementation(const TArray<int32>& FormationIds, int32 TargetFormationId)
+{
+	UWorld* World = GetWorld();
+	UMassWarFormationSubsystem* Formations = World ? World->GetSubsystem<UMassWarFormationSubsystem>() : nullptr;
+	const AMassWarSelectionPlayerController* OwningController = GetOwner<AMassWarSelectionPlayerController>();
+	if (!Formations || !OwningController)
+	{
+		return;
+	}
+
+	TArray<uint32> Ids;
+	Ids.Reserve(FormationIds.Num());
+	for (const int32 Id : FormationIds)
+	{
+		Ids.Add(static_cast<uint32>(Id));
+	}
+	Formations->IssueAttackOrder(UE::Mass::Utils::GetEntityManagerChecked(*World), Ids, static_cast<uint32>(TargetFormationId), OwningController->GetPlayerId());
 }

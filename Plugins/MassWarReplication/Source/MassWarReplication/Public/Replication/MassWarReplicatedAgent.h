@@ -33,6 +33,22 @@ struct MASSWARREPLICATION_API FReplicatedWarAgent : public FReplicatedAgentBase
 	UPROPERTY(Transient)
 	uint32 OwningPlayerId = 0;
 
+	/** EMassWarLifeState (Core's FMassWarLifeFragment::State). Unlike team/owner this changes during a
+	 *  unit's life - Alive -> Dying - so it is re-sent on change, which is what lets a client's visual
+	 *  play a death animation instead of the unit just disappearing. */
+	UPROPERTY(Transient)
+	uint8 LifeState = 0;
+
+	/** Core's FMassWarAttackFeedbackFragment::AttackCounter - an event counter that changes each time the
+	 *  unit lands an attack, so a client's puppet can play an attack animation per change. */
+	UPROPERTY(Transient)
+	uint8 AttackCounter = 0;
+
+	/** Core's FMassWarFormationMemberFragment::FormationId (0 = none). Changes when formations are merged or
+	 *  split, so it is re-sent on change; clients group selectable units by it. */
+	UPROPERTY(Transient)
+	uint32 FormationId = 0;
+
 private:
 	UPROPERTY(Transient)
 	FReplicatedAgentPositionYawData PositionYaw;

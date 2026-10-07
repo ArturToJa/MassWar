@@ -27,6 +27,14 @@
 			"Enabled": true
 		},
 		{
+			"Name": "MassWarFormations",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarPerception",
+			"Enabled": true
+		},
+		{
 			"Name": "MassGameplay",
 			"Enabled": true
 		},

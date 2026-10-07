@@ -30,6 +30,7 @@ public class MassWar : ModuleRules
 			{
 				"Slate",
 				"SlateCore",
+				"NavigationSystem",
 			}
 			);
 	}

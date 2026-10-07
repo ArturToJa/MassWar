@@ -8,8 +8,9 @@ public class MassWarExample : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput",
-			"MassWar", "MassWarCombat", "MassWarSelection", "MassWarStateTreeAI", "MassWarReplication", "MassWarFogOfWar", "MassWarEmbodiment", "MassEntity", "MassCommon", "MassSpawner", "MassRepresentation", "MassLOD", "MassActors" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Niagara",
+
+            "MassWar", "MassWarCombat", "MassWarSelection", "MassWarStateTreeAI", "MassWarReplication", "MassWarFogOfWar", "MassWarEmbodiment", "MassWarFormations", "MassEntity", "MassCommon", "MassSpawner", "MassRepresentation", "MassLOD", "MassActors" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

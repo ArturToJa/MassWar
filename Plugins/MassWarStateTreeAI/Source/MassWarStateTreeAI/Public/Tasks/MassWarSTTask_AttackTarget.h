@@ -19,8 +19,8 @@ struct FMassWarSTTask_AttackTargetInstanceData
 };
 
 /**
- * Writes an Attack order against Target (via FMassWarUnitStateView::RequestAttack, shared with the Actor
- * schema's AttackTargetActor task) and stays Running until MassWarCombat's damage processor (if
+ * Writes an Attack order against Target (via FMassWarUnitStateView::RequestAttack) and stays Running
+ * until MassWarCombat's damage processor (if
  * installed) reverts the order back to Idle - either the target died, or was otherwise invalidated.
  * Doesn't touch health/damage itself, and doesn't depend on MassWarCombat at all: if that plugin isn't
  * installed, this just parks the entity in an Attack order that nothing consumes, harmlessly.

@@ -7,6 +7,7 @@
 #include "MassSpawnerSubsystem.h"
 #include "MassEntityManager.h"
 #include "MassCommonFragments.h"
+#include "UnitBrain/MassWarUnitStateView.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/LocalPlayer.h"
 
@@ -58,7 +59,7 @@ void AMassWarHUD::DrawSelectionRings()
 
 	for (const FMassEntityHandle& Entity : SelectionSubsystem->GetSelection())
 	{
-		if (!EntityManager.IsEntityValid(Entity))
+		if (!FMassWarUnitStateView::IsLiving(EntityManager, Entity))
 		{
 			continue;
 		}

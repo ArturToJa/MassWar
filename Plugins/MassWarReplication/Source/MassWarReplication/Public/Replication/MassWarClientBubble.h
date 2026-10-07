@@ -27,10 +27,15 @@ public:
 
 #if UE_REPLICATION_COMPILE_SERVER_CODE
 	FMassWarTransformHandler& GetTransformHandlerMutable() { return TransformHandler; }
+
+	/** Updates the life state, attack counter and formation id sent for an already-added agent, marking it
+	 *  dirty only if any changed. */
+	void SetAgentDynamicState(FMassReplicatedAgentHandle Handle, uint8 LifeState, uint8 AttackCounter, uint32 FormationId);
 #endif // UE_REPLICATION_COMPILE_SERVER_CODE
 
 protected:
 #if UE_REPLICATION_COMPILE_CLIENT_CODE
+	virtual void PreReplicatedRemove(const TArrayView<int32> RemovedIndices, int32 FinalSize) override;
 	virtual void PostReplicatedAdd(const TArrayView<int32> AddedIndices, int32 FinalSize) override;
 	virtual void PostReplicatedChange(const TArrayView<int32> ChangedIndices, int32 FinalSize) override;
 

@@ -36,10 +36,8 @@ struct FMassWarSTEval_FindNearestEnemyInstanceData
 /**
  * Continuously tracks the nearest enemy unit (if any) within SearchRadius, for other nodes to bind to
  * (HasEnemyInRange condition, AttackTarget task's Target input, MoveTo's Destination input). Candidates
- * come from UMassWarUnitRegistrySubsystem::GetAllUnitHandles(), so this finds both ordinary Mass units
- * and (MassWarEmbodiment) embodied Actor units alike - the actual search is
- * FMassWarUnitStateView::FindNearestEnemy(), shared with FMassWarSTEval_FindNearestEnemyActor so both
- * StateTree schemas run identical decision logic.
+ * come from UMassWarUnitRegistrySubsystem::GetAllUnitHandles() - the actual search is
+ * FMassWarUnitStateView::FindNearestEnemy().
  */
 USTRUCT(meta = (DisplayName = "MassWar Find Nearest Enemy"))
 struct MASSWARSTATETREEAI_API FMassWarSTEval_FindNearestEnemy : public FMassStateTreeEvaluatorBase

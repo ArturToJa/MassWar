@@ -18,6 +18,9 @@ void UMassWarReplicator::AddRequirements(FMassEntityQuery& EntityQuery)
 	// below) so Core-only-dependent plugins like MassWarSelection can resolve units cross-network without
 	// depending on MassWarReplication themselves.
 	EntityQuery.AddRequirement<FMassWarNetIdFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassWarAttackFeedbackFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassWarFormationMemberFragment>(EMassFragmentAccess::ReadOnly);
 }
 
 void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context, FMassReplicationContext& ReplicationContext)
@@ -27,6 +30,9 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 	TConstArrayView<FMassWarTeamFragment> TeamList;
 	TConstArrayView<FMassWarOwnerFragment> OwnerList;
 	TArrayView<FMassWarNetIdFragment> NetIdList;
+	TConstArrayView<FMassWarLifeFragment> LifeList;
+	TConstArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList;
+	TConstArrayView<FMassWarFormationMemberFragment> FormationList;
 	FMassReplicationSharedFragment* RepSharedFrag = nullptr;
 
 	auto CacheViewsCallback = [&](FMassExecutionContext& Context)
@@ -35,6 +41,9 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		TeamList = Context.GetFragmentView<FMassWarTeamFragment>();
 		OwnerList = Context.GetFragmentView<FMassWarOwnerFragment>();
 		NetIdList = Context.GetMutableFragmentView<FMassWarNetIdFragment>();
+		LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
+		AttackFeedbackList = Context.GetFragmentView<FMassWarAttackFeedbackFragment>();
+		FormationList = Context.GetFragmentView<FMassWarFormationMemberFragment>();
 		RepSharedFrag = &Context.GetMutableSharedFragment<FMassReplicationSharedFragment>();
 		check(RepSharedFrag);
 
@@ -67,6 +76,9 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		PositionYawHandler.AddEntity(EntityIdx, InReplicatedAgent.GetReplicatedPositionYawDataMutable());
 		InReplicatedAgent.TeamId = TeamList[EntityIdx].TeamId;
 		InReplicatedAgent.OwningPlayerId = OwnerList[EntityIdx].OwningPlayerId;
+		InReplicatedAgent.LifeState = static_cast<uint8>(LifeList[EntityIdx].State);
+		InReplicatedAgent.AttackCounter = AttackFeedbackList[EntityIdx].AttackCounter;
+		InReplicatedAgent.FormationId = FormationList[EntityIdx].FormationId;
 
 		// The engine already assigned InReplicatedAgent's NetID (via FMassNetworkIDFragment) before this
 		// callback runs - mirror it into Core's own fragment so Selection/Registry can resolve this unit
@@ -82,8 +94,10 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		AMassWarClientBubbleInfo& BubbleInfo = RepSharedFrag->GetTypedClientBubbleInfoChecked<AMassWarClientBubbleInfo>(ClientHandle);
 		FMassWarClientBubbleHandler& Bubble = BubbleInfo.GetWarSerializer().Bubble;
 
-		// Team/owner don't change after AddEntityCallback set them once - only position/yaw needs continuous updates.
+		// Team/owner don't change after AddEntityCallback set them once. Position/yaw update continuously;
+		// life state (Alive -> Dying) and the attack counter change occasionally and are only re-sent when they do.
 		PositionYawHandler.ModifyEntity<FMassWarFastArrayItem>(Handle, EntityIdx, Bubble.GetTransformHandlerMutable());
+		Bubble.SetAgentDynamicState(Handle, static_cast<uint8>(LifeList[EntityIdx].State), AttackFeedbackList[EntityIdx].AttackCounter, FormationList[EntityIdx].FormationId);
 	};
 
 	auto RemoveEntityCallback = [&](FMassExecutionContext& Context, const FMassReplicatedAgentHandle Handle, const FMassClientHandle ClientHandle)

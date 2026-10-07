@@ -80,6 +80,12 @@ private:
 	FMassEntityHandle FindNearestUnitAtScreenPos(const FVector2D& ScreenPos, float PixelRadius) const;
 	FMassEntityManager* GetEntityManager() const;
 
+	/** Selection is by formation: any selected unit selects every unit of its formation (units without one stay as they are). */
+	TArray<FMassEntityHandle> ExpandToFormations(const TArray<FMassEntityHandle>& Units) const;
+
+	/** Splits a selection into the distinct formation ids in it and the units that belong to no formation. */
+	void CollectFormationIds(const TArray<FMassEntityHandle>& Units, TArray<int32>& OutFormationIds, TArray<FMassEntityHandle>& OutUnformedUnits) const;
+
 	/** Bundles a local FMassEntityHandle with its Core FMassWarNetIdFragment (0 if unassigned/no Replication) for order RPCs - see FMassWarOrderTarget. */
 	FMassWarOrderTarget MakeOrderTarget(FMassEntityManager& EntityManager, FMassEntityHandle Entity) const;
 	TArray<FMassWarOrderTarget> MakeOrderTargets(FMassEntityManager& EntityManager, const TArray<FMassEntityHandle>& Entities) const;
