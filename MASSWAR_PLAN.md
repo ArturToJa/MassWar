@@ -306,3 +306,17 @@ Min(F, Count-1)), F = (Time - StartTime) * SampleRate. (end of superseded text) 
 with a death clip are no longer hidden by the dying-visibility processor), attack counter change -> Attack once, else Idle/Walk/Run
 from speed measured from position changes (velocity is not replicated) with hysteresis; looping clips are phase-shifted per unit.
 Verified headless (all states reach the ISM component's custom data); the material and the visual result are for the user to check.
+
+**Pass 12 - dedicated server (2026-10-07), status.** `Source/MassWarExampleServer.Target.cs` exists, but THIS machine's engine is an installed
+(launcher) build and UBT refuses it: "Server targets are not currently supported from this engine distribution" - a real
+`MassWarExampleServer` build needs an engine built from source (or a server-capable distribution). What was verified instead:
+(1) the Game (client) target `MassWarExample` compiles for the project and ALL plugins in a non-editor configuration - this
+found and fixed one real packaging bug: four editor-only setup commandlets lived in the runtime game module and pulled in
+UnrealEd/StateTreeEditor headers; they now live in a new Editor-type module `MassWarExampleEditor` (UHT does not guard classes
+inside `#if WITH_EDITOR`, so a module split was needed); (2) the game ran as a true dedicated server through the editor binary
+(`UnrealEditor-Cmd -game -server`, NM_DedicatedServer, no local player) with two real client processes connected (`-game
+127.0.0.1:7777`): units spawned per joining player, each client got its own units with team/owner/FormationId, one clicked unit
+selected its whole 30-unit formation, a client's formation move order reached the server (owner-checked) and moved its units, fog
+of war only revealed enemies once seen, deaths replicated to both clients, and the battle ran to a conclusion on the server with
+no errors. NOT verified: a Server-target binary itself, and packaged (cooked) content. Selection/Embodiment stay in the server
+build on purpose (the order RPC component and the per-player camera pawn live there); their client-only work is skipped by net-mode checks.

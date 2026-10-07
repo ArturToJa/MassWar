@@ -6,9 +6,12 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MassWarReplicationSetupSubsystem)
 
-void UMassWarReplicationSetupSubsystem::PostInitialize()
+void UMassWarReplicationSetupSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::PostInitialize();
+	Super::Initialize(Collection);
+
+	// Makes sure UMassReplicationSubsystem is initialized (and so exists) before this subsystem.
+	Collection.InitializeDependency<UMassReplicationSubsystem>();
 
 	UMassReplicationSubsystem* ReplicationSubsystem = UWorld::GetSubsystem<UMassReplicationSubsystem>(GetWorld());
 	check(ReplicationSubsystem);
