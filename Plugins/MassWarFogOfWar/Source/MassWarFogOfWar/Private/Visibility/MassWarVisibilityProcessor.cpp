@@ -75,9 +75,12 @@ void UMassWarVisibilityProcessor::Execute(FMassEntityManager& EntityManager, FMa
 		uint8 TeamId = 0;
 		FVector Location = FVector::ZeroVector;
 		float SightRadius = 0.f;
+		bool bDying = false;
 	};
 
-	// A dying unit neither sees nor is seen: it is out of the game already.
+	// A dying unit no longer SEES (it is not a viewer, and does not count towards MaxSight) but is still SEEN like any other
+	// unit while it lingers: otherwise enemies would drop out of sight - and out of the picture - the instant they die,
+	// instead of playing their death animation.
 	TArray<FUnitInfo> Units;
 	float MaxSight = 0.f;
 	EntityQuery.ForEachEntityChunk(Context, [&Units, &MaxSight](FMassExecutionContext& Context)
@@ -89,7 +92,7 @@ void UMassWarVisibilityProcessor::Execute(FMassEntityManager& EntityManager, FMa
 
 		for (FMassExecutionContext::FEntityIterator It = Context.CreateEntityIterator(); It; ++It)
 		{
-			if (LifeList[It].IsDying() || TeamList[It].TeamId == 0)
+			if (TeamList[It].TeamId == 0)
 			{
 				continue;
 			}
@@ -98,7 +101,11 @@ void UMassWarVisibilityProcessor::Execute(FMassEntityManager& EntityManager, FMa
 			Unit.TeamId = TeamList[It].TeamId;
 			Unit.Location = TransformList[It].GetTransform().GetLocation();
 			Unit.SightRadius = VisibilityList[It].SightRadius;
-			MaxSight = FMath::Max(MaxSight, Unit.SightRadius);
+			Unit.bDying = LifeList[It].IsDying();
+			if (!Unit.bDying)
+			{
+				MaxSight = FMath::Max(MaxSight, Unit.SightRadius);
+			}
 		}
 	});
 
@@ -108,6 +115,10 @@ void UMassWarVisibilityProcessor::Execute(FMassEntityManager& EntityManager, FMa
 	const float InvCellSize = 1.f / GridCellSize;
 	for (int32 Index = 0; Index < Units.Num(); ++Index)
 	{
+		if (Units[Index].bDying)
+		{
+			continue; // seen, but no longer a viewer: kept out of the grids
+		}
 		const uint8 TeamId = Units[Index].TeamId;
 		FTeamGrid* Grid = Grids.FindByPredicate([TeamId](const FTeamGrid& G) { return G.TeamId == TeamId; });
 		if (!Grid)

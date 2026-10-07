@@ -294,3 +294,15 @@ server packaging (Win64 only for Pass 12).
 
 Begin with **Pass 1** now. I'll report back with the build result and the exact test steps before
 touching Pass 2.
+
+**Far-LOD animation (2026-10-05).** Far units (instanced static mesh) play a baked animation texture (engine AnimToTexture, bone mode) -
+used once, offline, in the editor; the runtime has NO dependency on that plugin. Embodiment ships `UMassWarFarAnimationTrait`
+(plain clip table: role Idle/Walk/Run/Attack/Death + start/end frame from the bake asset, sample rate, walk/run speed thresholds)
+and `UMassWarUpdateISMProcessor` (derives straight from UMassProcessor, NOT from the engine class), which replaces the engine's `UMassUpdateISMProcessor` (switched off IN MEMORY via reflection in StartupModule - never use SetShouldAutoRegisterWithGlobalList for this: in editor builds it writes DefaultMass.ini, and config sections are inherited by subclasses, which switched the replacement off too and made far units invisible;
+identical behaviour for units without the trait). Mass needs per-instance custom data pushed for every instance in the same loop as
+the transform, hence the replacement. Per instance per frame it writes 4 floats (`FMassWarFarAnimCustomData`) in the layout the ENGINE'S layer `ML_BoneAnimation` (AutoPlay on) already reads - [TimeOffset, Playrate, StartFrame, EndFrame]; no material work is needed (an earlier version sent a different layout and made far units stretched/flickering). The layer plays Frame = StartFrame + Fmod((Time + TimeOffset) * Playrate * SampleRate, EndFrame - StartFrame + 1) and always loops, so the offset is chosen to start a clip on its first frame, and a finished death is held with a one-frame range at Playrate 0. [OLD TEXT FOLLOWS, SUPERSEDED: clip start frame,
+frame count, start time, loop flag) read in the material with PerInstanceCustomData 0..3: Frame = Start + (loop ? Fmod(F, Count) :
+Min(F, Count-1)), F = (Time - StartTime) * SampleRate. (end of superseded text) Clip choice comes from unit data: dying -> Death (once, held; far dying units
+with a death clip are no longer hidden by the dying-visibility processor), attack counter change -> Attack once, else Idle/Walk/Run
+from speed measured from position changes (velocity is not replicated) with hysteresis; looping clips are phase-shifted per unit.
+Verified headless (all states reach the ISM component's custom data); the material and the visual result are for the user to check.
