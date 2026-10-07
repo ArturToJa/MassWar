@@ -16,6 +16,7 @@ public class MassWarEmbodiment : ModuleRules
 				"Engine",
 				"MassEntity",
 				"MassCommon",
+				"MassSpawner",
 				"MassActors",
 				"MassLOD",
 				"MassRepresentation",

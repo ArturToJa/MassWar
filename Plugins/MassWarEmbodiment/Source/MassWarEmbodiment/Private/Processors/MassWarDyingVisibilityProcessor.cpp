@@ -6,6 +6,7 @@
 #include "MassLODTypes.h"
 #include "MassRepresentationFragments.h"
 #include "MassRepresentationTypes.h"
+#include "FarAnimation/MassWarFarAnimationTypes.h"
 
 UMassWarDyingVisibilityProcessor::UMassWarDyingVisibilityProcessor()
 	: EntityQuery(*this)
@@ -22,6 +23,8 @@ void UMassWarDyingVisibilityProcessor::ConfigureQueries(const TSharedRef<FMassEn
 {
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassRepresentationLODFragment>(EMassFragmentAccess::ReadWrite);
+	// Units with a far death animation are not hidden when they die away from the camera: they play it as instances.
+	EntityQuery.AddConstSharedRequirement<FMassWarFarAnimationParams>(EMassFragmentPresence::Optional);
 }
 
 void UMassWarDyingVisibilityProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -30,6 +33,12 @@ void UMassWarDyingVisibilityProcessor::Execute(FMassEntityManager& EntityManager
 	{
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TArrayView<FMassRepresentationLODFragment> LODList = Context.GetMutableFragmentView<FMassRepresentationLODFragment>();
+
+		const FMassWarFarAnimationParams* FarAnim = Context.GetConstSharedFragmentPtr<FMassWarFarAnimationParams>();
+		if (FarAnim && FarAnim->CountClips(EMassWarFarAnimRole::Death) > 0)
+		{
+			return;
+		}
 
 		for (FMassExecutionContext::FEntityIterator It = Context.CreateEntityIterator(); It; ++It)
 		{
