@@ -12,18 +12,19 @@
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MassWarClientBubble)
 
 #if UE_REPLICATION_COMPILE_SERVER_CODE
-void FMassWarClientBubbleHandler::SetAgentDynamicState(const FMassReplicatedAgentHandle Handle, const uint8 LifeState, const uint8 AttackCounter, const uint32 FormationId)
+void FMassWarClientBubbleHandler::SetAgentDynamicState(const FMassReplicatedAgentHandle Handle, const uint8 LifeState, const uint8 AttackCounter, const uint32 FormationId, const uint32 LoadoutPacked)
 {
 	check(AgentHandleManager.IsValidHandle(Handle));
 
 	const int32 AgentsIdx = AgentLookupArray[Handle.GetIndex()].AgentsIdx;
 	FMassWarFastArrayItem& Item = (*Agents)[AgentsIdx];
 
-	if (Item.Agent.LifeState != LifeState || Item.Agent.AttackCounter != AttackCounter || Item.Agent.FormationId != FormationId)
+	if (Item.Agent.LifeState != LifeState || Item.Agent.AttackCounter != AttackCounter || Item.Agent.FormationId != FormationId || Item.Agent.LoadoutPacked != LoadoutPacked)
 	{
 		Item.Agent.LifeState = LifeState;
 		Item.Agent.AttackCounter = AttackCounter;
 		Item.Agent.FormationId = FormationId;
+		Item.Agent.LoadoutPacked = LoadoutPacked;
 		Serializer->MarkItemDirty(Item);
 	}
 }
@@ -96,6 +97,11 @@ void FMassWarClientBubbleHandler::PostReplicatedAdd(const TArrayView<int32> Adde
 			Formation->FormationId = ReplicatedEntity.FormationId;
 		}
 
+		if (FMassWarLoadoutFragment* Loadout = EntityView.GetFragmentDataPtr<FMassWarLoadoutFragment>())
+		{
+			Loadout->Unpack(ReplicatedEntity.LoadoutPacked);
+		}
+
 		// Initialize the smoothing target to the just-placed position/rotation so the first update we
 		// receive later interpolates from here, not from the fragment's zeroed default.
 		if (FMassWarClientInterpolationFragment* Interp = EntityView.GetFragmentDataPtr<FMassWarClientInterpolationFragment>())
@@ -160,6 +166,11 @@ void FMassWarClientBubbleHandler::PostReplicatedChangeEntity(const FMassEntityVi
 	if (FMassWarFormationMemberFragment* Formation = EntityView.GetFragmentDataPtr<FMassWarFormationMemberFragment>())
 	{
 		Formation->FormationId = Item.FormationId;
+	}
+
+	if (FMassWarLoadoutFragment* Loadout = EntityView.GetFragmentDataPtr<FMassWarLoadoutFragment>())
+	{
+		Loadout->Unpack(Item.LoadoutPacked);
 	}
 
 	// Feed the smoothing target rather than hard-snapping FTransformFragment, so

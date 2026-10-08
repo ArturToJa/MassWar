@@ -2,8 +2,8 @@
 	"FileVersion": 3,
 	"Version": 1,
 	"VersionName": "1.0",
-	"FriendlyName": "MassWarEmbodiment",
-	"Description": "Optional MassWar feature plugin: cosmetic near-LOD Actor puppets for ordinary Mass units. The Mass entity stays the single source of truth; the game supplies the Actor class and this plugin keeps it in sync with its entity.",
+	"FriendlyName": "MassWarWeapons",
+	"Description": "MassWar feature plugin: weapon definitions and catalog, a three-slot loadout per unit (primary, secondary, special), spawn-time loadouts and the active weapon. Depends on MassWar core.",
 	"Category": "MassWar",
 	"CreatedBy": "ArturToJa",
 	"CreatedByURL": "",
@@ -16,7 +16,7 @@
 	"Installed": false,
 	"Modules": [
 		{
-			"Name": "MassWarEmbodiment",
+			"Name": "MassWarWeapons",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
 		}
@@ -27,11 +27,11 @@
 			"Enabled": true
 		},
 		{
-			"Name": "MassWarWeapons",
+			"Name": "MassGameplay",
 			"Enabled": true
 		},
 		{
-			"Name": "MassGameplay",
+			"Name": "Niagara",
 			"Enabled": true
 		}
 	]

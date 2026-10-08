@@ -10,7 +10,7 @@ public class MassWarExample : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Niagara",
 
-            "MassWar", "MassWarCombat", "MassWarSelection", "MassWarStateTreeAI", "MassWarReplication", "MassWarFogOfWar", "MassWarEmbodiment", "MassWarFormations", "MassEntity", "MassCommon", "MassSpawner", "MassRepresentation", "MassLOD", "MassActors" });
+            "MassWar", "MassWarCombat", "MassWarSelection", "MassWarStateTreeAI", "MassWarReplication", "MassWarFogOfWar", "MassWarEmbodiment", "MassWarFormations", "MassWarWeapons", "MassEntity", "MassCommon", "MassSpawner", "MassRepresentation", "MassLOD", "MassActors" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 

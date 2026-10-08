@@ -2,9 +2,9 @@
 
 using UnrealBuildTool;
 
-public class MassWarEmbodiment : ModuleRules
+public class MassWarWeapons : ModuleRules
 {
-	public MassWarEmbodiment(ReadOnlyTargetRules Target) : base(Target)
+	public MassWarWeapons(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
 
@@ -14,15 +14,12 @@ public class MassWarEmbodiment : ModuleRules
 				"Core",
 				"CoreUObject",
 				"Engine",
+				"DeveloperSettings",
+				"Niagara",
 				"MassEntity",
 				"MassCommon",
 				"MassSpawner",
-				"MassActors",
-				"MassLOD",
-				"MassRepresentation",
 				"MassWar",
-				"MassWarWeapons",
-				"Niagara",
 			}
 			);
 	}
