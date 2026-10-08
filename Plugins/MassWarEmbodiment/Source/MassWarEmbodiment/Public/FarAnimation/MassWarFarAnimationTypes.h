@@ -3,7 +3,10 @@
 #pragma once
 
 #include "MassEntityElementTypes.h"
+#include "Weapons/MassWarWeaponDefinition.h"
 #include "MassWarFarAnimationTypes.generated.h"
+
+class UAnimSequence;
 
 /** What a baked clip is used for. Several clips may share a role (e.g. three death variants); one is picked per unit. */
 UENUM(BlueprintType)
@@ -30,6 +33,12 @@ struct MASSWAREMBODIMENT_API FMassWarFarAnimClip
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassWar|FarAnimation")
 	EMassWarFarAnimRole Role = EMassWarFarAnimRole::Idle;
 
+	/** The weapon stance this clip is for. A unit uses the clips matching the hold type of the weapon in its hand
+	 *  (Rifle clips for a rifleman); where there are none it falls back to the "Unarmed" ones, so a table that only
+	 *  has one set of clips (all left on Unarmed) keeps working for every unit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassWar|FarAnimation")
+	EMassWarWeaponHoldType HoldType = EMassWarWeaponHoldType::Unarmed;
+
 	/** First frame of the clip in the baked texture (the bake asset's Animations[n].StartFrame). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassWar|FarAnimation", meta = (ClampMin = "0"))
 	int32 StartFrame = 0;
@@ -37,6 +46,11 @@ struct MASSWAREMBODIMENT_API FMassWarFarAnimClip
 	/** Last frame of the clip, inclusive (the bake asset's Animations[n].EndFrame). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassWar|FarAnimation", meta = (ClampMin = "0"))
 	int32 EndFrame = 0;
+
+	/** The animation this clip was baked from (the bake asset's Animations[n]). Optional: only used to find where the unit's hand is,
+	 *  so weapons can follow it (see the trait's Hand Bone). Clips without one carry no weapon. Baked from its start, at the trait's Sample Rate. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassWar|FarAnimation")
+	TObjectPtr<UAnimSequence> Animation;
 
 	int32 GetNumFrames() const { return FMath::Max(1, EndFrame - StartFrame + 1); }
 };
@@ -64,6 +78,34 @@ struct MASSWAREMBODIMENT_API FMassWarFarAnimationParams : public FMassConstShare
 	/** Speed (uu/s) from which the Run clip plays instead of Walk. */
 	UPROPERTY()
 	float RunSpeed = 300.f;
+
+	/** The hand bone's transform in mesh space (the space the baked body is in) for every baked frame, indexed by the bake's
+	 *  frame number. A frame with no source animation holds a zero-scale transform. Empty = weapons do not follow a hand. */
+	UPROPERTY()
+	TArray<FTransform> HandTrack;
+
+	/** The hand's transform at a (fractional) frame of the clip [ClipStart, ClipEnd], blending to the next frame and wrapping
+	 *  at the clip's end the way the playing layer does. False if the track has no data there. */
+	bool SampleHand(float Frame, int32 ClipStart, int32 ClipEnd, FTransform& OutHand) const
+	{
+		const int32 A = FMath::FloorToInt(Frame);
+		if (!HandTrack.IsValidIndex(A) || HandTrack[A].GetScale3D().IsNearlyZero())
+		{
+			return false;
+		}
+		const float Alpha = Frame - static_cast<float>(A);
+		const int32 B = A >= ClipEnd ? ClipStart : A + 1;
+		if (Alpha < 0.01f || !HandTrack.IsValidIndex(B) || HandTrack[B].GetScale3D().IsNearlyZero())
+		{
+			OutHand = HandTrack[A];
+			return true;
+		}
+		const FTransform& From = HandTrack[A];
+		const FTransform& To = HandTrack[B];
+		OutHand = FTransform(FQuat::FastLerp(From.GetRotation(), To.GetRotation(), Alpha).GetNormalized(),
+			FMath::Lerp(From.GetTranslation(), To.GetTranslation(), Alpha));
+		return true;
+	}
 
 	/** Number of clips with this role. */
 	int32 CountClips(EMassWarFarAnimRole Role) const
@@ -94,6 +136,32 @@ struct MASSWAREMBODIMENT_API FMassWarFarAnimationParams : public FMassConstShare
 		}
 		return nullptr;
 	}
+
+	/** A clip for a role in the stance of the given hold type: one tagged with that hold type, else a generic
+	 *  (Unarmed-tagged) one, else any clip of the role. The Nth of the candidates (N wraps around). Null if the role has none. */
+	const FMassWarFarAnimClip* FindClipFor(EMassWarFarAnimRole Role, EMassWarWeaponHoldType HoldType, uint32 Pick = 0) const
+	{
+		for (const EMassWarWeaponHoldType Wanted : { HoldType, EMassWarWeaponHoldType::Unarmed })
+		{
+			int32 Count = 0;
+			for (const FMassWarFarAnimClip& Clip : Clips)
+			{
+				Count += (Clip.Role == Role && Clip.HoldType == Wanted);
+			}
+			if (Count > 0)
+			{
+				int32 Remaining = static_cast<int32>(Pick % static_cast<uint32>(Count));
+				for (const FMassWarFarAnimClip& Clip : Clips)
+				{
+					if (Clip.Role == Role && Clip.HoldType == Wanted && Remaining-- == 0)
+					{
+						return &Clip;
+					}
+				}
+			}
+		}
+		return FindClip(Role, Pick);
+	}
 };
 
 /** Per-unit animation state of a far (instanced mesh) unit. Driven by UMassWarUpdateISMProcessor. */
@@ -121,6 +189,13 @@ struct MASSWAREMBODIMENT_API FMassWarFarAnimationFragment : public FMassFragment
 	/** Speed measured from position changes (smoothed). Velocity is not replicated, so clients cannot use it. */
 	float SmoothedSpeed = 0.f;
 	bool bMoving = false;
+
+	/** Weapon state. LastActiveWeaponId: the weapon id last looked at (0xFF = none yet), so the catalog is only consulted when
+	 *  it changes; HoldType: the stance of that weapon (EMassWarWeaponHoldType); ClipHoldType: the stance the playing clip was
+	 *  picked for. */
+	uint8 LastActiveWeaponId = 0xFF;
+	uint8 HoldType = 0;
+	uint8 ClipHoldType = 0;
 };
 
 /**

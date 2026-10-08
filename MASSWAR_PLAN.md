@@ -331,6 +331,19 @@ Spawn: `UMassWarWeaponSubsystem::ApplyLoadout(EntityManager, Entity, FMassWarLoa
 formation); `SetActiveSlot` to draw another weapon; the first non-empty slot (primary, secondary, special) starts in hand. Near puppet
 (`AMassWarUnitVisualCharacter`): a `WeaponMesh` component on `WeaponSocketName` (default hand_r) showing the active weapon; `FMassWarVisualState` and
 `UMassWarPuppetAnimInstance` expose `ActiveWeaponHoldType`, `bHasWeapon`, `ActiveWeapon`; per-weapon attack montages fall back to the puppet's; the
-muzzle Niagara effect is spawned (pooled) on each shot. NOT done: step 4 far-LOD weapons (instanced meshes - needs per-weapon rigid-bound AnimToTexture
-bakes, per-loadout mesh descriptions, and far animation clips per hold type so the baked rifle clips can be used), step 5 gameplay (ammo, reload,
+muzzle Niagara effect is spawned (pooled) on each shot. NOT done in steps 1-3: step 4 far-LOD weapons (see below), step 5 gameplay (ammo, reload,
 choosing the weapon by situation; "gating Combat's damage processor" from the original plan).
+
+**MassWarWeapons step 4 - weapons on instanced (non-actor) units (2026-10-08, "Option B", final form).** Three tiers: close = actor (weapon in the socket); middle =
+instanced body mesh with the weapon following the hand; far = instanced body mesh, NO weapon. The weapon is one more instance per armed unit in a mesh set of the weapon
+alone (its normal `Mesh`/materials), pushed by `UMassWarUpdateISMProcessor::UpdateInstancedWeapon`, placed every frame as `AttachOffset x HandTrack[frame] x body mesh placement
+x unit transform`. The hand position comes from the Far Animation trait: `SkeletalMesh` (the bake's), `HandBoneName` (a bone or a socket of that mesh, e.g. the weapon socket; the user's is HandGrip_R) and a per-clip `Animation`; `BuildHandTrack` (trait
+BuildTemplate, once per template) evaluates each clip's pose at `i / SampleRate` with the mesh's own bone container (exactly the bake's sampling, retargeting included -
+verified: 0.000 uu error against a live skeletal mesh component) and stores the hand's mesh-space transform for every baked frame in `FMassWarFarAnimationParams::HandTrack`
+(one blend of two stored transforms per unit per frame; skipped outside the weapon's LOD range). The frame is derived from the same custom data the animation layer reads.
+"Body mesh placement" = the body desc's mesh `LocalTransform` (+ `TransformOffset`), read from the engine's mesh info, so the user's existing body placement applies automatically.
+Weapon definition fields: `bShowOnInstancedUnits`, `bInstancedCastShadows`, `InstancedLODSignificanceRange` (set to the middle body mesh's range so the weapon vanishes where the
+far body mesh takes over). Mesh sets are requested during the update loop and built right after it (FindOrAddStaticMeshDesc while the loop holds the engine's mesh list crashes
+in the access detector). Far animation clips are hold-type aware (`FMassWarFarAnimClip::HoldType`; a unit uses clips for its weapon's stance, falling back to Unarmed-tagged
+ones, then any). Verified headless: hand track exact vs live component; 150 armed units -> 150 weapon pushes per frame. Visual alignment needs the user's eye in the editor.
+Not done: step 5 (gameplay: ammo, reload, weapon choice).

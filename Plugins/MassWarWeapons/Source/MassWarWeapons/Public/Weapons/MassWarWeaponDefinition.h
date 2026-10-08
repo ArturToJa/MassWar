@@ -8,6 +8,7 @@
 
 class UStaticMesh;
 class UAnimMontage;
+class UMaterialInterface;
 class UNiagaraSystem;
 
 /**
@@ -64,6 +65,27 @@ public:
 	 *  attack montages are used. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Visual")
 	TArray<TObjectPtr<UAnimMontage>> AttackMontages;
+
+	// ---- Instanced (middle distance) visuals ----
+	//
+	// Units that are not close enough for a full actor are instanced meshes. Their weapon is this same Mesh drawn as one
+	// more instance per unit, placed every frame from the position of the hand bone in the unit's baked animation (the
+	// unit type's Far Animation trait supplies the hand bone and the animations) and Attach Offset above, so it follows
+	// the arms. Units further out than the range below show no weapon at all.
+
+	/** Draw this weapon on instanced-mesh units at all. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instanced Visual")
+	bool bShowOnInstancedUnits = true;
+
+	/** Whether the instanced weapon casts a shadow. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instanced Visual", meta = (EditCondition = "bShowOnInstancedUnits"))
+	bool bInstancedCastShadows = false;
+
+	/** The range of Mass LOD significance in which the weapon is drawn: from the first value (inclusive) up to the second
+	 *  (exclusive). Set it to the range of your middle-distance body mesh, so the weapon disappears where the far body mesh
+	 *  takes over. Mass LODs: 0 = High (actor), 1 = Medium, 2 = Low, 3 = Off. The default 0..3 covers every instanced distance. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Instanced Visual", meta = (EditCondition = "bShowOnInstancedUnits"))
+	FVector2D InstancedLODSignificanceRange = FVector2D(0.0, 3.0);
 
 	// ---- Muzzle effect (played on every shot) ----
 

@@ -4,6 +4,7 @@
 
 #include "MassEntityTraitBase.h"
 #include "FarAnimation/MassWarFarAnimationTypes.h"
+#include "Engine/SkeletalMesh.h"
 #include "MassWarFarAnimationTrait.generated.h"
 
 /**
@@ -42,6 +43,16 @@ public:
 	/** From this speed (uu/s) the Run clip plays instead of Walk. */
 	UPROPERTY(EditAnywhere, Category = "MassWar|FarAnimation", meta = (ClampMin = "0.0"))
 	float RunSpeed = 300.f;
+
+	/** Where the unit's hand is, for weapons carried by instanced-mesh units: the skeletal mesh the bake was made from, the bone
+	 *  the weapon is held by - a bone or a socket of that mesh, the same name as the visual actor's weapon socket - and, per clip above, the animation it
+	 *  was baked from. At startup the hand's position is sampled for every baked frame (exactly as the bake did), so a weapon is
+	 *  placed in the hand every frame at the cost of one blend of two stored transforms. Leave the mesh empty for no weapons. */
+	UPROPERTY(EditAnywhere, Category = "MassWar|FarAnimation|Weapons")
+	TObjectPtr<USkeletalMesh> SkeletalMesh;
+
+	UPROPERTY(EditAnywhere, Category = "MassWar|FarAnimation|Weapons")
+	FName HandBoneName = TEXT("hand_r");
 
 protected:
 	virtual void BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const override;
