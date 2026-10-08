@@ -21,6 +21,9 @@ struct FMassWarPuppetEntityState
 	/** FMassWarAttackFeedbackFragment::AttackCounter - an event counter that changes each time the unit lands
 	 *  an attack; compare it with the last value seen to know when to play an attack animation. */
 	uint8 AttackCounter = 0;
+
+	/** The weapon in hand: its id in the weapon catalog (FMassWarLoadoutFragment), 0 for none. */
+	uint8 ActiveWeaponId = 0;
 };
 
 /**

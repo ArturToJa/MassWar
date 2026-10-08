@@ -21,6 +21,8 @@ void UMassWarReplicator::AddRequirements(FMassEntityQuery& EntityQuery)
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarAttackFeedbackFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarFormationMemberFragment>(EMassFragmentAccess::ReadOnly);
+	// Only unit types with the weapons trait carry a loadout.
+	EntityQuery.AddRequirement<FMassWarLoadoutFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 }
 
 void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context, FMassReplicationContext& ReplicationContext)
@@ -33,6 +35,7 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 	TConstArrayView<FMassWarLifeFragment> LifeList;
 	TConstArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList;
 	TConstArrayView<FMassWarFormationMemberFragment> FormationList;
+	TConstArrayView<FMassWarLoadoutFragment> LoadoutList;
 	FMassReplicationSharedFragment* RepSharedFrag = nullptr;
 
 	auto CacheViewsCallback = [&](FMassExecutionContext& Context)
@@ -44,6 +47,7 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		AttackFeedbackList = Context.GetFragmentView<FMassWarAttackFeedbackFragment>();
 		FormationList = Context.GetFragmentView<FMassWarFormationMemberFragment>();
+		LoadoutList = Context.GetFragmentView<FMassWarLoadoutFragment>();
 		RepSharedFrag = &Context.GetMutableSharedFragment<FMassReplicationSharedFragment>();
 		check(RepSharedFrag);
 
@@ -79,6 +83,7 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		InReplicatedAgent.LifeState = static_cast<uint8>(LifeList[EntityIdx].State);
 		InReplicatedAgent.AttackCounter = AttackFeedbackList[EntityIdx].AttackCounter;
 		InReplicatedAgent.FormationId = FormationList[EntityIdx].FormationId;
+		InReplicatedAgent.LoadoutPacked = LoadoutList.IsEmpty() ? 0u : LoadoutList[EntityIdx].Pack();
 
 		// The engine already assigned InReplicatedAgent's NetID (via FMassNetworkIDFragment) before this
 		// callback runs - mirror it into Core's own fragment so Selection/Registry can resolve this unit
@@ -97,7 +102,7 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		// Team/owner don't change after AddEntityCallback set them once. Position/yaw update continuously;
 		// life state (Alive -> Dying) and the attack counter change occasionally and are only re-sent when they do.
 		PositionYawHandler.ModifyEntity<FMassWarFastArrayItem>(Handle, EntityIdx, Bubble.GetTransformHandlerMutable());
-		Bubble.SetAgentDynamicState(Handle, static_cast<uint8>(LifeList[EntityIdx].State), AttackFeedbackList[EntityIdx].AttackCounter, FormationList[EntityIdx].FormationId);
+		Bubble.SetAgentDynamicState(Handle, static_cast<uint8>(LifeList[EntityIdx].State), AttackFeedbackList[EntityIdx].AttackCounter, FormationList[EntityIdx].FormationId, LoadoutList.IsEmpty() ? 0u : LoadoutList[EntityIdx].Pack());
 	};
 
 	auto RemoveEntityCallback = [&](FMassExecutionContext& Context, const FMassReplicatedAgentHandle Handle, const FMassClientHandle ClientHandle)

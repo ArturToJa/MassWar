@@ -21,6 +21,8 @@ public class MassWarEmbodiment : ModuleRules
 				"MassLOD",
 				"MassRepresentation",
 				"MassWar",
+				"MassWarWeapons",
+				"Niagara",
 			}
 			);
 	}

@@ -5,9 +5,11 @@
 #include "GameFramework/Character.h"
 #include "MassEntityHandle.h"
 #include "Characters/MassWarVisualPuppetInterface.h"
+#include "Weapons/MassWarWeaponDefinition.h"
 #include "MassWarUnitVisualCharacter.generated.h"
 
 class UAnimMontage;
+class UStaticMeshComponent;
 
 /**
  * What animation (or any other cosmetic code) can read about the Mass entity this puppet is currently
@@ -42,6 +44,17 @@ struct MASSWAREMBODIMENT_API FMassWarVisualState
 	 *  while alive. */
 	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
 	int32 DeathVariant = 0;
+
+	/** The weapon in the unit's hand (null when it carries nothing). Lets an anim blueprint branch on the exact weapon. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
+	TObjectPtr<const UMassWarWeaponDefinition> ActiveWeapon = nullptr;
+
+	/** How the unit holds its active weapon - pick rifle / pistol / launcher stance animations with this. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
+	EMassWarWeaponHoldType HoldType = EMassWarWeaponHoldType::Unarmed;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
+	bool bHasWeapon = false;
 };
 
 /**
@@ -85,7 +98,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MassWar|Animation")
 	TArray<TObjectPtr<UAnimMontage>> AttackMontages;
 
+	/** The mesh shown in the unit's hand: whichever weapon is active (see UMassWarWeaponDefinition). Empty and
+	 *  hidden while the unit is unarmed. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MassWar|Weapon")
+	TObjectPtr<UStaticMeshComponent> WeaponMesh;
+
+	virtual void PostInitializeComponents() override;
+
 protected:
+	/** Socket or bone of the character mesh the weapon is attached to - normally the right hand (e.g. hand_r, or a
+	 *  socket you added for it). Each weapon's own Attach Offset then fine-tunes the grip. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MassWar|Weapon")
+	FName WeaponSocketName = TEXT("hand_r");
+
 	/** Called every time this puppet's unit lands an attack (after the montage, if any, has started) - for
 	 *  attack effects such as sounds or particles. Not called for attacks that happened while the puppet
 	 *  wasn't showing the unit. */
@@ -118,6 +143,13 @@ private:
 
 	/** Attack counter last seen for the unit being shown - see FMassWarAttackFeedbackFragment. */
 	uint8 LastAttackCounter = 0;
+
+	/** Weapon (catalog id) currently shown in the hand. */
+	uint8 EquippedWeaponId = 0;
+	bool bWeaponInitialized = false;
+
+	void UpdateWeapon(uint8 WeaponId);
+	void PlayMuzzleEffect();
 
 	void PlayAttack(uint8 AttackCounter, FMassEntityHandle Entity);
 	void StopAttackMontages();
