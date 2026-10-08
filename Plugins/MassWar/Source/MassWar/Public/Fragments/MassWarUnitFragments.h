@@ -278,6 +278,52 @@ struct MASSWAR_API FMassWarFormationMemberFragment : public FMassFragment
 	uint32 FormationId = 0;
 };
 
+/** The three places a unit can carry a weapon. Any of them may be empty. */
+UENUM(BlueprintType)
+enum class EMassWarWeaponSlot : uint8
+{
+	/** Main weapon - e.g. an assault rifle, carbine or sniper rifle. */
+	Primary,
+	/** Sidearm - e.g. a pistol. */
+	Secondary,
+	/** Special weapon - e.g. a rocket launcher. */
+	Special
+};
+
+constexpr int32 MassWarWeaponSlotCount = 3;
+
+/**
+ * What a unit carries: one weapon id per slot (0 = empty; otherwise the weapon's index in the project's weapon
+ * catalog + 1, see MassWarWeapons) and which slot is in hand. Core only holds the compact ids so that Replication
+ * can send them without depending on the weapons plugin (same idea as FormationId). Added by MassWarWeapons' trait.
+ */
+USTRUCT()
+struct MASSWAR_API FMassWarLoadoutFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	static constexpr uint8 NoActiveSlot = 0xFF;
+
+	/** Reflected on purpose: Mass copies a template's initial fragment values by reflection, so a plain member would be lost. */
+	UPROPERTY(VisibleAnywhere, Category = "MassWar|Weapons")
+	uint8 WeaponIds[MassWarWeaponSlotCount] = { 0, 0, 0 };
+	UPROPERTY(VisibleAnywhere, Category = "MassWar|Weapons")
+	uint8 ActiveSlot = NoActiveSlot;
+
+	uint8 GetActiveWeaponId() const { return ActiveSlot < MassWarWeaponSlotCount ? WeaponIds[ActiveSlot] : 0; }
+
+	/** All four bytes in one value, for replication. */
+	uint32 Pack() const { return static_cast<uint32>(WeaponIds[0]) | (static_cast<uint32>(WeaponIds[1]) << 8) | (static_cast<uint32>(WeaponIds[2]) << 16) | (static_cast<uint32>(ActiveSlot) << 24); }
+
+	void Unpack(uint32 Packed)
+	{
+		WeaponIds[0] = static_cast<uint8>(Packed);
+		WeaponIds[1] = static_cast<uint8>(Packed >> 8);
+		WeaponIds[2] = static_cast<uint8>(Packed >> 16);
+		ActiveSlot = static_cast<uint8>(Packed >> 24);
+	}
+};
+
 USTRUCT()
 struct MASSWAR_API FMassWarNetIdFragment : public FMassFragment
 {

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Formation/MassWarFormationTypes.h"
+#include "Weapons/MassWarWeaponSubsystem.h"
 #include "GameFramework/GameModeBase.h"
 #include "MassEntityTypes.h"
 #include "MassEntityHandle.h"
@@ -48,6 +49,11 @@ protected:
 	/** Shape and spacing the spawned formations use when they get a Move order. */
 	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
 	FMassWarFormationSettings FormationSettings;
+
+	/** Weapons the spawned formations carry: formation 0 gets entry 0, formation 1 entry 1, and so on (wrapping around).
+	 *  Empty = every unit keeps its unit type's default loadout (the MassWar Weapons trait). */
+	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
+	TArray<FMassWarLoadout> FormationLoadouts;
 
 
 	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
@@ -102,9 +108,14 @@ private:
 	 *  without hunting for it with WASD + zoom. */
 	void DebugFocusCameraOnUnits(const TArray<FString>& Args);
 
+	/** Test harness (console: MassWar.DebugWeapon [primary|secondary|special|next]): every living unit draws the weapon in that slot (if it
+	 *  carries one), or - "next", the default - its next carried weapon. Server only. */
+	void DebugSwitchActiveWeapon(const TArray<FString>& Args);
+
 	IConsoleCommand* DebugAttackConsoleCommand = nullptr;
 	IConsoleCommand* DebugMoveConsoleCommand = nullptr;
 	IConsoleCommand* DebugFocusConsoleCommand = nullptr;
+	IConsoleCommand* DebugWeaponConsoleCommand = nullptr;
 	FTimerHandle DebugHUDTimerHandle;
 
 	UPROPERTY()

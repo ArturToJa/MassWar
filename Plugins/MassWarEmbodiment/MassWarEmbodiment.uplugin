@@ -27,6 +27,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "MassWarWeapons",
+			"Enabled": true
+		},
+		{
 			"Name": "MassGameplay",
 			"Enabled": true
 		}

@@ -320,3 +320,17 @@ selected its whole 30-unit formation, a client's formation move order reached th
 of war only revealed enemies once seen, deaths replicated to both clients, and the battle ran to a conclusion on the server with
 no errors. NOT verified: a Server-target binary itself, and packaged (cooked) content. Selection/Embodiment stay in the server
 build on purpose (the order RPC component and the per-player camera pawn live there); their client-only work is skipped by net-mode checks.
+
+**MassWarWeapons (2026-10-07), steps 1-3 of 5 done: carrying, near visuals, muzzle effects.** Plugin `MassWarWeapons` (depends on Core + Niagara;
+Embodiment depends on it). Weapons are data assets authored in the project: `UMassWarWeaponDefinition` (slot Primary/Secondary/Special, hold type
+Unarmed/Pistol/Rifle/Launcher, static mesh + attach offset, optional attack montages, optional Niagara muzzle effect + socket/offset) listed in a
+`UMassWarWeaponCatalog` (index + 1 = the byte id stored per unit - append only), chosen in Project Settings > Plugins > MassWar Weapons.
+Per unit: Core's `FMassWarLoadoutFragment` (3 weapon ids + active slot; added by the `MassWar Weapons` trait, which also holds the default loadout;
+fields are UPROPERTYs on purpose - Mass copies template initial values by reflection) replicated as one packed uint32 on the agent.
+Spawn: `UMassWarWeaponSubsystem::ApplyLoadout(EntityManager, Entity, FMassWarLoadout)` after spawning (demo game mode: `FormationLoadouts`, one per
+formation); `SetActiveSlot` to draw another weapon; the first non-empty slot (primary, secondary, special) starts in hand. Near puppet
+(`AMassWarUnitVisualCharacter`): a `WeaponMesh` component on `WeaponSocketName` (default hand_r) showing the active weapon; `FMassWarVisualState` and
+`UMassWarPuppetAnimInstance` expose `ActiveWeaponHoldType`, `bHasWeapon`, `ActiveWeapon`; per-weapon attack montages fall back to the puppet's; the
+muzzle Niagara effect is spawned (pooled) on each shot. NOT done: step 4 far-LOD weapons (instanced meshes - needs per-weapon rigid-bound AnimToTexture
+bakes, per-loadout mesh descriptions, and far animation clips per hold type so the baked rifle clips can be used), step 5 gameplay (ammo, reload,
+choosing the weapon by situation; "gating Combat's damage processor" from the original plan).
