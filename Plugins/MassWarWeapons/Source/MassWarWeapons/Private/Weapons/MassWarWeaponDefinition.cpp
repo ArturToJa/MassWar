@@ -15,3 +15,4 @@ UNiagaraSystem* UMassWarWeaponDefinition::LoadMuzzleEffect() const
 {
 	return MuzzleEffect.IsNull() ? nullptr : MuzzleEffect.LoadSynchronous();
 }
+
