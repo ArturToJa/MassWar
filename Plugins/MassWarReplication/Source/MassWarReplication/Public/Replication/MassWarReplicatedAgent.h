@@ -49,6 +49,11 @@ struct MASSWARREPLICATION_API FReplicatedWarAgent : public FReplicatedAgentBase
 	UPROPERTY(Transient)
 	uint32 FormationId = 0;
 
+	/** Core's FMassWarLoadoutFragment, packed (weapon ids + the active slot); 0 for units without a loadout. Changes when
+	 *  a unit draws another weapon, so it is re-sent on change. */
+	UPROPERTY(Transient)
+	uint32 LoadoutPacked = 0;
+
 private:
 	UPROPERTY(Transient)
 	FReplicatedAgentPositionYawData PositionYaw;

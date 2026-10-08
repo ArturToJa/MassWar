@@ -28,6 +28,7 @@ void UMassWarVisualSyncProcessor::ConfigureQueries(const TSharedRef<FMassEntityM
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarAttackFeedbackFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassWarLoadoutFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.RequireMutatingWorldAccess(); // moves Actors
 }
 
@@ -42,6 +43,7 @@ void UMassWarVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMa
 		const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TConstArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList = Context.GetFragmentView<FMassWarAttackFeedbackFragment>();
+		const TConstArrayView<FMassWarLoadoutFragment> LoadoutList = Context.GetFragmentView<FMassWarLoadoutFragment>();
 
 		for (FMassExecutionContext::FEntityIterator It = Context.CreateEntityIterator(); It; ++It)
 		{
@@ -64,6 +66,7 @@ void UMassWarVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMa
 				FMassWarPuppetEntityState EntityState;
 				EntityState.bIsDying = LifeList[It].IsDying();
 				EntityState.AttackCounter = AttackFeedbackList[It].AttackCounter;
+				EntityState.ActiveWeaponId = LoadoutList.IsEmpty() ? 0 : LoadoutList[It].GetActiveWeaponId();
 				Puppet->SyncFromEntity(Context.GetEntity(It), TransformList[It].GetTransform(), DeltaTime, EntityState);
 			}
 		}

@@ -3,6 +3,8 @@
 #include "Processors/MassWarUpdateISMProcessor.h"
 #include "FarAnimation/MassWarFarAnimationTypes.h"
 #include "Fragments/MassWarUnitFragments.h"
+#include "Weapons/MassWarWeaponSubsystem.h"
+#include "Weapons/MassWarWeaponDefinition.h"
 #include "MassVisualizationComponent.h"
 #include "MassUpdateISMProcessor.h"
 #include "MassRepresentationSubsystem.h"
@@ -27,10 +29,11 @@ namespace
 		Anim.State = static_cast<uint8>(Role);
 		Anim.StartTime = StartTime;
 		Anim.bLoop = bLoop;
+		Anim.ClipHoldType = Anim.HoldType;
 	}
 
 	/** A locomotion clip for Role, falling back to the nearest other locomotion clip the unit type has. */
-	const FMassWarFarAnimClip* FindLocomotionClip(const FMassWarFarAnimationParams& Params, EMassWarFarAnimRole Role, uint32 Pick, EMassWarFarAnimRole& OutRole)
+	const FMassWarFarAnimClip* FindLocomotionClip(const FMassWarFarAnimationParams& Params, EMassWarFarAnimRole Role, uint32 Pick, EMassWarWeaponHoldType HoldType, EMassWarFarAnimRole& OutRole)
 	{
 		static const EMassWarFarAnimRole IdleChain[] = { EMassWarFarAnimRole::Idle, EMassWarFarAnimRole::Walk, EMassWarFarAnimRole::Run };
 		static const EMassWarFarAnimRole WalkChain[] = { EMassWarFarAnimRole::Walk, EMassWarFarAnimRole::Run, EMassWarFarAnimRole::Idle };
@@ -38,7 +41,7 @@ namespace
 		const EMassWarFarAnimRole* Chain = Role == EMassWarFarAnimRole::Idle ? IdleChain : (Role == EMassWarFarAnimRole::Walk ? WalkChain : RunChain);
 		for (int32 Index = 0; Index < 3; ++Index)
 		{
-			if (const FMassWarFarAnimClip* Clip = Params.FindClip(Chain[Index], Pick))
+			if (const FMassWarFarAnimClip* Clip = Params.FindClipFor(Chain[Index], HoldType, Pick))
 			{
 				OutRole = Role; // the state stays what was asked for, so it is not re-picked every frame
 				return Clip;
@@ -50,7 +53,8 @@ namespace
 	/** Advances one unit's animation state and returns the custom data its instance should show. */
 	FMassWarFarAnimCustomData UpdateFarAnimation(FMassWarFarAnimationFragment& Anim, const FMassWarFarAnimationParams& Params,
 		const FMassWarLifeFragment* Life, const FMassWarAttackFeedbackFragment* Attack,
-		const FTransform& Transform, const FTransform& PrevTransform, FMassEntityHandle Entity, float DeltaTime, float Now)
+		const FTransform& Transform, const FTransform& PrevTransform, FMassEntityHandle Entity, float DeltaTime, float Now,
+		uint8 ActiveWeaponId, const UMassWarWeaponSubsystem* Weapons)
 	{
 		const bool bResync = !Anim.bInitialized || (Now - Anim.LastUpdateTime) > ResyncGapSeconds;
 		Anim.LastUpdateTime = Now;
@@ -67,6 +71,14 @@ namespace
 			Anim.bMoving = !Anim.bMoving;
 		}
 
+		// The stance of the weapon in hand (looked up only when the weapon changes).
+		if (ActiveWeaponId != Anim.LastActiveWeaponId)
+		{
+			Anim.LastActiveWeaponId = ActiveWeaponId;
+			const UMassWarWeaponDefinition* Weapon = Weapons ? Weapons->GetDefinition(ActiveWeaponId) : nullptr;
+			Anim.HoldType = static_cast<uint8>(Weapon ? Weapon->HoldType : EMassWarWeaponHoldType::Unarmed);
+		}
+
 		const uint32 Pick = GetTypeHash(Entity);
 		const float SecondsPerFrame = 1.f / Params.SampleRate;
 
@@ -75,7 +87,7 @@ namespace
 		{
 			if (Anim.State != static_cast<uint8>(EMassWarFarAnimRole::Death) || !Anim.bInitialized)
 			{
-				if (const FMassWarFarAnimClip* Clip = Params.FindClip(EMassWarFarAnimRole::Death, Pick))
+				if (const FMassWarFarAnimClip* Clip = Params.FindClipFor(EMassWarFarAnimRole::Death, static_cast<EMassWarWeaponHoldType>(Anim.HoldType), Pick))
 				{
 					// On the server TimeDying says how far into the death the unit is; on a client it stays 0 and the clip starts now.
 					StartClip(Anim, *Clip, EMassWarFarAnimRole::Death, Now - Life->TimeDying, false);
@@ -94,7 +106,7 @@ namespace
 				else if (Attack->AttackCounter != Anim.LastAttackCounter)
 				{
 					Anim.LastAttackCounter = Attack->AttackCounter;
-					if (const FMassWarFarAnimClip* Clip = Params.FindClip(EMassWarFarAnimRole::Attack, Pick + Attack->AttackCounter))
+					if (const FMassWarFarAnimClip* Clip = Params.FindClipFor(EMassWarFarAnimRole::Attack, static_cast<EMassWarWeaponHoldType>(Anim.HoldType), Pick + Attack->AttackCounter))
 					{
 						StartClip(Anim, *Clip, EMassWarFarAnimRole::Attack, Now, false);
 					}
@@ -111,10 +123,10 @@ namespace
 		{
 			const EMassWarFarAnimRole Wanted = !Anim.bMoving ? EMassWarFarAnimRole::Idle
 				: (Anim.SmoothedSpeed >= Params.RunSpeed ? EMassWarFarAnimRole::Run : EMassWarFarAnimRole::Walk);
-			if (!Anim.bInitialized || Anim.State != static_cast<uint8>(Wanted))
+			if (!Anim.bInitialized || Anim.State != static_cast<uint8>(Wanted) || Anim.ClipHoldType != Anim.HoldType)
 			{
 				EMassWarFarAnimRole ChosenRole = Wanted;
-				if (const FMassWarFarAnimClip* Clip = FindLocomotionClip(Params, Wanted, Pick, ChosenRole))
+				if (const FMassWarFarAnimClip* Clip = FindLocomotionClip(Params, Wanted, Pick, static_cast<EMassWarWeaponHoldType>(Anim.HoldType), ChosenRole))
 				{
 					// Phase-shift each unit within the loop so a crowd does not step in lockstep.
 					const float Phase = static_cast<float>(((Pick * 2654435761u) >> 8) & 0xFFFFu) / 65536.f * Clip->GetNumFrames() * SecondsPerFrame;
@@ -123,6 +135,7 @@ namespace
 				else
 				{
 					Anim.State = static_cast<uint8>(Wanted);
+					Anim.ClipHoldType = Anim.HoldType;
 				}
 			}
 		}
@@ -178,17 +191,134 @@ void UMassWarUpdateISMProcessor::ConfigureQueries(const TSharedRef<FMassEntityMa
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.AddRequirement<FMassWarAttackFeedbackFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.AddConstSharedRequirement<FMassWarFarAnimationParams>(EMassFragmentPresence::Optional);
+	EntityQuery.AddRequirement<FMassWarLoadoutFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
+}
+
+void UMassWarUpdateISMProcessor::UpdateInstancedWeapon(FMassEntityHandle Entity, const uint8 ActiveWeaponId, const FMassWarFarAnimationParams& Params, const FMassWarFarAnimCustomData& Anim, const float Now,
+	const FTransform& Transform, const FTransform& PrevTransform, const float LODSignificance, const float PrevLODSignificance, const FStaticMeshInstanceVisualizationDesc& BodyDesc,
+	FMassInstancedStaticMeshInfoArrayView& Infos, const UMassWarWeaponSubsystem* Weapons)
+{
+	if (ActiveWeaponId == 0 || !Weapons)
+	{
+		return;
+	}
+	if (WeaponVisuals.Num() <= ActiveWeaponId)
+	{
+		WeaponVisuals.SetNum(256);
+	}
+	FWeaponVisual& Visual = WeaponVisuals[ActiveWeaponId];
+
+	if (Visual.State == FWeaponVisual::EState::Unresolved)
+	{
+		const UMassWarWeaponDefinition* Weapon = Weapons->GetDefinition(ActiveWeaponId);
+		if (Weapon && Weapon->bShowOnInstancedUnits && !Weapon->Mesh.IsNull())
+		{
+			// The mesh set cannot be built here (the engine's mesh list is being read by this very loop): ask for it. It is
+			// built right after the loop, and the weapon appears a frame or two later.
+			Visual.State = FWeaponVisual::EState::Pending;
+			Visual.AttachOffset = Weapon->AttachOffset;
+			Visual.MinLODSignificance = static_cast<float>(Weapon->InstancedLODSignificanceRange.X);
+			Visual.MaxLODSignificance = static_cast<float>(Weapon->InstancedLODSignificanceRange.Y);
+			PendingWeapons.Add(ActiveWeaponId);
+		}
+		else
+		{
+			Visual.State = FWeaponVisual::EState::None;
+		}
+		return;
+	}
+
+	// Outside its range the weapon is simply not pushed (and so not drawn); a mesh set that was just added is usable a little later still.
+	if (Visual.State != FWeaponVisual::EState::Ready || LODSignificance < Visual.MinLODSignificance || LODSignificance >= Visual.MaxLODSignificance
+		|| !Visual.Handle.IsValid() || !Infos.IsValidIndex(Visual.Handle.ToIndex()) || !Infos[Visual.Handle.ToIndex()].IsValid())
+	{
+		return;
+	}
+
+	// The frame of the baked animation the unit is showing, as the animation layer works it out.
+	const float NumFrames = Anim.EndFrame - Anim.StartFrame + 1.f;
+	const float Frame = Anim.Playrate > 0.f ? Anim.StartFrame + FMath::Fmod((Now + Anim.TimeOffset) * Anim.Playrate * Params.SampleRate, NumFrames) : Anim.StartFrame;
+	FTransform Hand;
+	if (!Params.SampleHand(Frame, FMath::RoundToInt(Anim.StartFrame), FMath::RoundToInt(Anim.EndFrame), Hand))
+	{
+		return;
+	}
+
+	// Where the baked body sits relative to the unit: the mesh's own placement inside the instance, then the set's offset.
+	// (The body mesh that overlaps the weapon's range is used, as the unit type may use different meshes at different distances.)
+	FTransform BodyPlacement = FTransform::Identity;
+	if (!BodyDesc.Meshes.IsEmpty())
+	{
+		const FMassStaticMeshInstanceVisualizationMeshDesc* Mesh = &BodyDesc.Meshes[0];
+		for (const FMassStaticMeshInstanceVisualizationMeshDesc& Candidate : BodyDesc.Meshes)
+		{
+			if (Candidate.MinLODSignificance <= LODSignificance && LODSignificance < Candidate.MaxLODSignificance)
+			{
+				Mesh = &Candidate;
+				break;
+			}
+		}
+		BodyPlacement = Mesh->LocalTransform;
+	}
+	if (BodyDesc.bUseTransformOffset)
+	{
+		BodyPlacement = BodyPlacement * BodyDesc.TransformOffset;
+	}
+
+	const FTransform InUnit = Visual.AttachOffset * Hand * BodyPlacement;
+	Infos[Visual.Handle.ToIndex()].AddBatchedTransform(Entity, InUnit * Transform, InUnit * PrevTransform, LODSignificance, PrevLODSignificance);
+}
+
+void UMassWarUpdateISMProcessor::CreatePendingWeaponDescs(const UMassWarWeaponSubsystem* Weapons)
+{
+	UMassRepresentationSubsystem* RepresentationSubsystem = PendingSubsystem.Get();
+	if (PendingWeapons.IsEmpty() || !RepresentationSubsystem)
+	{
+		PendingWeapons.Reset();
+		return;
+	}
+
+	for (const uint8 WeaponId : PendingWeapons)
+	{
+		FWeaponVisual& Visual = WeaponVisuals[WeaponId];
+		const UMassWarWeaponDefinition* Weapon = Weapons ? Weapons->GetDefinition(WeaponId) : nullptr;
+		UStaticMesh* WeaponMesh = Weapon ? Weapon->LoadMesh() : nullptr;
+		if (!WeaponMesh)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("MassWar instanced weapons: weapon %s has no loadable mesh - instanced units will not show it."), *GetNameSafe(Weapon));
+			Visual.State = FWeaponVisual::EState::None;
+			continue;
+		}
+
+		FStaticMeshInstanceVisualizationDesc Desc;
+		FMassStaticMeshInstanceVisualizationMeshDesc& MeshDesc = Desc.Meshes.AddDefaulted_GetRef();
+		MeshDesc.Mesh = WeaponMesh;
+		MeshDesc.bCastShadows = Weapon->bInstancedCastShadows;
+		MeshDesc.MinLODSignificance = Visual.MinLODSignificance;
+		MeshDesc.MaxLODSignificance = Visual.MaxLODSignificance;
+		Visual.Handle = RepresentationSubsystem->FindOrAddStaticMeshDesc(Desc);
+		Visual.State = FWeaponVisual::EState::Ready;
+	}
+	PendingWeapons.Reset();
 }
 
 void UMassWarUpdateISMProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	const UWorld* World = EntityManager.GetWorld();
 	const float Now = World ? static_cast<float>(World->GetTimeSeconds()) : 0.f;
+	const UMassWarWeaponSubsystem* Weapons = World ? World->GetSubsystem<UMassWarWeaponSubsystem>() : nullptr;
 
-	EntityQuery.ForEachEntityChunk(Context, [Now](FMassExecutionContext& Context)
+	EntityQuery.ForEachEntityChunk(Context, [this, Now, Weapons](FMassExecutionContext& Context)
 	{
 		UMassRepresentationSubsystem* RepresentationSubsystem = Context.GetSharedFragment<FMassRepresentationSubsystemSharedFragment>().RepresentationSubsystem;
 		check(RepresentationSubsystem);
+		if (PendingSubsystem.Get() != RepresentationSubsystem)
+		{
+			// Mesh sets belong to one representation subsystem; a different one (new world) starts fresh.
+			WeaponVisuals.Reset();
+			PendingWeapons.Reset();
+			PendingSubsystem = RepresentationSubsystem;
+		}
 		FMassInstancedStaticMeshInfoArrayView ISMInfo = RepresentationSubsystem->GetMutableInstancedStaticMeshInfos();
 
 		const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
@@ -200,6 +330,7 @@ void UMassWarUpdateISMProcessor::Execute(FMassEntityManager& EntityManager, FMas
 		const FMassWarFarAnimationParams* AnimParams = Context.GetConstSharedFragmentPtr<FMassWarFarAnimationParams>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TConstArrayView<FMassWarAttackFeedbackFragment> AttackList = Context.GetFragmentView<FMassWarAttackFeedbackFragment>();
+		const TConstArrayView<FMassWarLoadoutFragment> LoadoutList = Context.GetFragmentView<FMassWarLoadoutFragment>();
 		const bool bAnimate = AnimParams && !AnimList.IsEmpty();
 		const float DeltaTime = Context.GetDeltaTimeSeconds();
 
@@ -211,6 +342,8 @@ void UMassWarUpdateISMProcessor::Execute(FMassEntityManager& EntityManager, FMas
 
 			if (Representation.CurrentRepresentation == EMassRepresentationType::StaticMeshInstance)
 			{
+				const uint8 ActiveWeaponId = LoadoutList.IsEmpty() ? 0 : LoadoutList[EntityIt].GetActiveWeaponId();
+
 				const int32 ISMInfoIndex = Representation.StaticMeshDescHandle.ToIndex();
 				if (ensureMsgf(ISMInfo.IsValidIndex(ISMInfoIndex), TEXT("Invalid handle index %u for ISMInfosView"), ISMInfoIndex))
 				{
@@ -221,8 +354,16 @@ void UMassWarUpdateISMProcessor::Execute(FMassEntityManager& EntityManager, FMas
 						// Must follow the transform for every instance, in the same order (see class comment).
 						const FMassWarFarAnimCustomData Data = UpdateFarAnimation(AnimList[EntityIt], *AnimParams,
 							LifeList.IsEmpty() ? nullptr : &LifeList[EntityIt], AttackList.IsEmpty() ? nullptr : &AttackList[EntityIt],
-							TransformFragment.GetTransform(), Representation.PrevTransform, Context.GetEntity(EntityIt), DeltaTime, Now);
+							TransformFragment.GetTransform(), Representation.PrevTransform, Context.GetEntity(EntityIt), DeltaTime, Now,
+							ActiveWeaponId, Weapons);
 						ISMInfo[ISMInfoIndex].AddBatchedCustomData(Data, RepresentationLOD.LODSignificance, Representation.PrevLODSignificance);
+
+							// The unit's weapon, in its hand (not while dying: the body falls over, the weapon would not).
+							if (ActiveWeaponId != 0 && !AnimParams->HandTrack.IsEmpty() && (LifeList.IsEmpty() || !LifeList[EntityIt].IsDying()))
+							{
+								UpdateInstancedWeapon(Context.GetEntity(EntityIt), ActiveWeaponId, *AnimParams, Data, Now, TransformFragment.GetTransform(), Representation.PrevTransform,
+									RepresentationLOD.LODSignificance, Representation.PrevLODSignificance, ISMInfo[ISMInfoIndex].GetDesc(), ISMInfo, Weapons);
+							}
 					}
 				}
 			}
@@ -230,4 +371,7 @@ void UMassWarUpdateISMProcessor::Execute(FMassEntityManager& EntityManager, FMas
 			Representation.PrevLODSignificance = RepresentationLOD.LODSignificance;
 		}
 	});
+
+	// Every view of the engine's mesh list is released now: new mesh sets requested during the loop can be built.
+	CreatePendingWeaponDescs(Weapons);
 }

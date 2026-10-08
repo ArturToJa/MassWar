@@ -22,6 +22,7 @@
 #include "Player/MassWarSelectionPlayerController.h"
 #include "UI/MassWarHUD.h"
 #include "Formation/MassWarFormationSubsystem.h"
+#include "Weapons/MassWarWeaponSubsystem.h"
 
 AMassWarDemoGameMode::AMassWarDemoGameMode()
 {
@@ -67,6 +68,15 @@ void AMassWarDemoGameMode::BeginPlay()
 			ECVF_Default);
 	}
 
+	if (!DebugWeaponConsoleCommand)
+	{
+		DebugWeaponConsoleCommand = IConsoleManager::Get().RegisterConsoleCommand(
+			TEXT("MassWar.DebugWeapon"),
+			TEXT("Test harness: every unit draws a weapon. Arg: primary | secondary | special | next (default: each unit's next carried weapon)."),
+			FConsoleCommandWithArgsDelegate::CreateUObject(this, &AMassWarDemoGameMode::DebugSwitchActiveWeapon),
+			ECVF_Default);
+	}
+
 	GetWorldTimerManager().SetTimer(DebugHUDTimerHandle, this, &AMassWarDemoGameMode::UpdateDebugHUD, 0.5f, true);
 }
 
@@ -88,6 +98,12 @@ void AMassWarDemoGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		IConsoleManager::Get().UnregisterConsoleObject(DebugFocusConsoleCommand);
 		DebugFocusConsoleCommand = nullptr;
+	}
+
+	if (DebugWeaponConsoleCommand)
+	{
+		IConsoleManager::Get().UnregisterConsoleObject(DebugWeaponConsoleCommand);
+		DebugWeaponConsoleCommand = nullptr;
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -226,6 +242,16 @@ void AMassWarDemoGameMode::SpawnUnitsForPlayer(UMassEntityConfigAsset& Config, u
 		{
 			const int32 Num = FMath::Min(PerFormation, SpawnedEntities.Num() - Start);
 			Formations->CreateFormation(EntityManager, TConstArrayView<FMassEntityHandle>(SpawnedEntities.GetData() + Start, Num), PlayerId, FormationSettings);
+
+			// Each formation carries its own weapons (spawn-time loadout).
+			if (const UMassWarWeaponSubsystem* Weapons = World->GetSubsystem<UMassWarWeaponSubsystem>(); Weapons && !FormationLoadouts.IsEmpty())
+			{
+				const FMassWarLoadout& Loadout = FormationLoadouts[(Start / PerFormation) % FormationLoadouts.Num()];
+				for (int32 Offset = 0; Offset < Num; ++Offset)
+				{
+					Weapons->ApplyLoadout(EntityManager, SpawnedEntities[Start + Offset], Loadout);
+				}
+			}
 		}
 	}
 
@@ -445,6 +471,65 @@ void AMassWarDemoGameMode::UpdateDebugHUD()
 		ActorCount, InstanceCount, OffCount, NearestDistSq < TNumericLimits<float>::Max() ? FMath::Sqrt(NearestDistSq) : -1.f);
 	GEngine->AddOnScreenDebugMessage(/*Key=*/ 101, /*TimeToDisplay=*/ 1.f, FColor::Cyan, RepresentationMessage);
 	UE_LOG(LogTemp, Verbose, TEXT("MassWarDemoGameMode HUD: %s"), *RepresentationMessage);}
+
+void AMassWarDemoGameMode::DebugSwitchActiveWeapon(const TArray<FString>& Args)
+{
+	UMassSpawnerSubsystem* Spawner = GetWorld() ? GetWorld()->GetSubsystem<UMassSpawnerSubsystem>() : nullptr;
+	const UMassWarWeaponSubsystem* Weapons = GetWorld() ? GetWorld()->GetSubsystem<UMassWarWeaponSubsystem>() : nullptr;
+	if (!Spawner || !Weapons)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode: DebugWeapon needs spawned units and the weapons plugin"));
+		return;
+	}
+
+	// "primary" / "secondary" / "special" (or 0-2) draws that slot; anything else (default "next") cycles.
+	const FString Arg = Args.Num() > 0 ? Args[0].ToLower() : TEXT("next");
+	int32 WantedSlot = INDEX_NONE;
+	if (Arg == TEXT("primary") || Arg == TEXT("0")) { WantedSlot = 0; }
+	else if (Arg == TEXT("secondary") || Arg == TEXT("1")) { WantedSlot = 1; }
+	else if (Arg == TEXT("special") || Arg == TEXT("2")) { WantedSlot = 2; }
+	int32 Units = 0, Switched = 0;
+
+	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
+	for (const TPair<uint8, TArray<FMassEntityHandle>>& TeamPair : EntitiesByTeam)
+	{
+		for (const FMassEntityHandle& Entity : TeamPair.Value)
+		{
+			if (!FMassWarUnitStateView::IsLiving(EntityManager, Entity))
+			{
+				continue;
+			}
+			++Units;
+			const FMassWarLoadoutFragment* Loadout = EntityManager.GetFragmentDataPtr<FMassWarLoadoutFragment>(Entity);
+			if (!Loadout)
+			{
+				continue;
+			}
+
+			int32 Target = WantedSlot;
+			if (Target == INDEX_NONE)
+			{
+				// The next non-empty slot after the one in hand.
+				const int32 Current = Loadout->ActiveSlot < MassWarWeaponSlotCount ? Loadout->ActiveSlot : -1;
+				for (int32 Step = 1; Step <= MassWarWeaponSlotCount; ++Step)
+				{
+					const int32 Candidate = (Current + Step + MassWarWeaponSlotCount) % MassWarWeaponSlotCount;
+					if (Loadout->WeaponIds[Candidate] != 0)
+					{
+						Target = Candidate;
+						break;
+					}
+				}
+			}
+			if (Target != INDEX_NONE && Weapons->SetActiveSlot(EntityManager, Entity, static_cast<EMassWarWeaponSlot>(Target)))
+			{
+				++Switched;
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode: DebugWeapon '%s': %d of %d living units drew a weapon (units without that weapon, or without any, keep what they have)"), *Arg, Switched, Units);
+}
 
 void AMassWarDemoGameMode::DebugFocusCameraOnUnits(const TArray<FString>& Args)
 {

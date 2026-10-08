@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Animation/AnimInstance.h"
+#include "Weapons/MassWarWeaponDefinition.h"
 #include "MassWarPuppetAnimInstance.generated.h"
 
 class AMassWarUnitVisualCharacter;
@@ -38,6 +39,19 @@ public:
 	/** Which death animation to play, in [0, DeathVariantCount) - see AMassWarUnitVisualCharacter. */
 	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Animation")
 	int32 UnitDeathVariant = 0;
+
+	/** How the unit holds the weapon in its hand (Unarmed / Pistol / Rifle / Launcher) - choose the locomotion, idle and
+	 *  aim animations with this (e.g. a "Blend Poses by Enum" node), instead of one fixed stance. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Animation")
+	EMassWarWeaponHoldType ActiveWeaponHoldType = EMassWarWeaponHoldType::Unarmed;
+
+	/** True while the unit has a weapon in hand. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Animation")
+	bool bHasWeapon = false;
+
+	/** The exact weapon in hand (null when none) - for branching on a specific weapon rather than its hold type. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Animation")
+	TObjectPtr<const UMassWarWeaponDefinition> ActiveWeapon = nullptr;
 
 protected:
 	virtual void NativeInitializeAnimation() override;

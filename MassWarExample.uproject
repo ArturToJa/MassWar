@@ -45,6 +45,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "MassWarWeapons",
+			"Enabled": true
+		},
+		{
 			"Name": "MassWarPerception",
 			"Enabled": true
 		},

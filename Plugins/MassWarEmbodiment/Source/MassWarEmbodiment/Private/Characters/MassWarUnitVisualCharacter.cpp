@@ -1,12 +1,17 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Characters/MassWarUnitVisualCharacter.h"
+#include "Weapons/MassWarWeaponSubsystem.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 
 AMassWarUnitVisualCharacter::AMassWarUnitVisualCharacter()
 {
@@ -39,24 +44,92 @@ AMassWarUnitVisualCharacter::AMassWarUnitVisualCharacter()
 		SkeletalMesh->bEnableUpdateRateOptimizations = true;
 		SkeletalMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::OnlyTickPoseWhenRendered;
 	}
+
+	// The weapon in hand: one static mesh component, re-pointed when the active weapon changes. Attached to
+	// WeaponSocketName in PostInitializeComponents, once a Blueprint's override of that name is known.
+	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
+	WeaponMesh->SetupAttachment(GetMesh());
+	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponMesh->SetGenerateOverlapEvents(false);
+	WeaponMesh->SetCanEverAffectNavigation(false);
+	WeaponMesh->bReceivesDecals = false;
+	WeaponMesh->SetVisibility(false);
+}
+
+void AMassWarUnitVisualCharacter::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+
+	if (WeaponMesh && GetMesh())
+	{
+		WeaponMesh->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponSocketName);
+	}
+}
+
+void AMassWarUnitVisualCharacter::UpdateWeapon(const uint8 WeaponId)
+{
+	if (bWeaponInitialized && WeaponId == EquippedWeaponId)
+	{
+		return;
+	}
+	bWeaponInitialized = true;
+	EquippedWeaponId = WeaponId;
+
+	const UWorld* World = GetWorld();
+	const UMassWarWeaponSubsystem* Weapons = World ? World->GetSubsystem<UMassWarWeaponSubsystem>() : nullptr;
+	const UMassWarWeaponDefinition* Definition = (Weapons && WeaponId != 0) ? Weapons->GetDefinition(WeaponId) : nullptr;
+
+	VisualState.ActiveWeapon = Definition;
+	VisualState.bHasWeapon = Definition != nullptr;
+	VisualState.HoldType = Definition ? Definition->HoldType : EMassWarWeaponHoldType::Unarmed;
+
+	UStaticMesh* WeaponStaticMesh = Definition ? Definition->LoadMesh() : nullptr;
+	if (WeaponMesh)
+	{
+		WeaponMesh->SetStaticMesh(WeaponStaticMesh);
+		WeaponMesh->SetRelativeTransform(Definition ? Definition->AttachOffset : FTransform::Identity);
+		WeaponMesh->SetVisibility(WeaponStaticMesh != nullptr);
+	}
+}
+
+void AMassWarUnitVisualCharacter::PlayMuzzleEffect()
+{
+	const UMassWarWeaponDefinition* Definition = VisualState.ActiveWeapon;
+	UNiagaraSystem* Effect = Definition ? Definition->LoadMuzzleEffect() : nullptr;
+	if (!Effect || !WeaponMesh)
+	{
+		return;
+	}
+
+	// At the mesh's muzzle socket if it has one, otherwise at MuzzleOffset from the mesh origin. Pooled and
+	// released by itself when it finishes - a firefight spawns a lot of these.
+	const bool bHasSocket = !Definition->MuzzleSocketName.IsNone() && WeaponMesh->DoesSocketExist(Definition->MuzzleSocketName);
+	const FTransform& Offset = Definition->MuzzleOffset;
+	UNiagaraFunctionLibrary::SpawnSystemAttached(Effect, WeaponMesh, bHasSocket ? Definition->MuzzleSocketName : NAME_None,
+		Offset.GetLocation(), Offset.Rotator(), Offset.GetScale3D(), EAttachLocation::KeepRelativeOffset, /*bAutoDestroy=*/ true, ENCPoolMethod::AutoRelease);
 }
 
 void AMassWarUnitVisualCharacter::PlayAttack(const uint8 AttackCounter, const FMassEntityHandle Entity)
 {
-	if (AttackMontages.Num() > 0)
+	// The weapon in hand brings its own attack animations; the puppet's own are the fallback.
+	const UMassWarWeaponDefinition* Weapon = VisualState.ActiveWeapon;
+	const TArray<TObjectPtr<UAnimMontage>>& Montages = (Weapon && Weapon->AttackMontages.Num() > 0) ? Weapon->AttackMontages : AttackMontages;
+
+	if (Montages.Num() > 0)
 	{
 		if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
 		{
 			// Round-robin on the counter, offset per unit so neighbours don't all swing the same clip at once.
 			// Purely cosmetic and local to this machine - there is no random state to keep in sync.
 			const uint32 Pick = static_cast<uint32>(AttackCounter) + GetTypeHash(Entity);
-			if (UAnimMontage* Montage = AttackMontages[Pick % static_cast<uint32>(AttackMontages.Num())])
+			if (UAnimMontage* Montage = Montages[Pick % static_cast<uint32>(Montages.Num())])
 			{
 				AnimInstance->Montage_Play(Montage);
 			}
 		}
 	}
 
+	PlayMuzzleEffect();
 	OnUnitAttacked();
 }
 
@@ -74,6 +147,9 @@ void AMassWarUnitVisualCharacter::StopAttackMontages()
 void AMassWarUnitVisualCharacter::SyncFromEntity(FMassEntityHandle Entity, const FTransform& EntityTransform, const float DeltaTime, const FMassWarPuppetEntityState& EntityState)
 {
 	const bool bIsDying = EntityState.bIsDying;
+
+	// Which weapon is in hand first: an attack that happens this very frame must use it (montage, muzzle effect).
+	UpdateWeapon(EntityState.ActiveWeaponId);
 
 	const UWorld* World = GetWorld();
 	const double Now = World ? World->GetTimeSeconds() : 0.0;
