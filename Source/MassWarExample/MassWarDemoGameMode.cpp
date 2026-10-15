@@ -23,10 +23,11 @@
 #include "UI/MassWarHUD.h"
 #include "Formation/MassWarFormationSubsystem.h"
 #include "Weapons/MassWarWeaponSubsystem.h"
+#include "Spawning/MassWarSpawnSubsystem.h"
+#include "Spawning/MassWarFormationTemplate.h"
 
 AMassWarDemoGameMode::AMassWarDemoGameMode()
 {
-	DemoUnitConfigPath = FSoftObjectPath(TEXT("/Game/MassWar/DA_MassWarDemoUnit.DA_MassWarDemoUnit"));
 
 	PlayerControllerClass = AMassWarSelectionPlayerController::StaticClass();
 	DefaultPawnClass = AMassWarRTSCameraPawn::StaticClass();
@@ -127,17 +128,23 @@ FVector AMassWarDemoGameMode::ComputeSpawnOriginForPlayer(int32 PlayerIndex) con
 	return FVector(Side * TeamOriginOffset * Slot, 0.f, 100.f);
 }
 
-UMassEntityConfigAsset* AMassWarDemoGameMode::GetOrLoadDemoUnitConfig()
+UMassEntityConfigAsset* AMassWarDemoGameMode::FindDemoUnitConfig() const
 {
-	if (!CachedDemoUnitConfig)
+	for (const UMassWarFormationTemplate* Template : PlayerFormations)
 	{
-		CachedDemoUnitConfig = Cast<UMassEntityConfigAsset>(DemoUnitConfigPath.TryLoad());
-		if (!CachedDemoUnitConfig)
+		if (!Template)
 		{
-			UE_LOG(LogTemp, Error, TEXT("MassWarDemoGameMode: could not load demo unit config at %s"), *DemoUnitConfigPath.ToString());
+			continue;
+		}
+		for (const FMassWarUnitSpawnEntry& Entry : Template->Units)
+		{
+			if (Entry.Config)
+			{
+				return Entry.Config;
+			}
 		}
 	}
-	return CachedDemoUnitConfig;
+	return nullptr;
 }
 
 void AMassWarDemoGameMode::HandleStartingNewPlayer_Implementation(APlayerController* NewPlayer)
@@ -155,10 +162,14 @@ void AMassWarDemoGameMode::HandleStartingNewPlayer_Implementation(APlayerControl
 
 		UE_LOG(LogTemp, Log, TEXT("MassWarDemoGameMode: player #%d (id=%u) assigned to team %d"), PlayerIndex, PlayerId, TeamId);
 
-		if (UMassEntityConfigAsset* Config = GetOrLoadDemoUnitConfig())
+		const FVector Origin = ComputeSpawnOriginForPlayer(PlayerIndex);
+		if (!PlayerFormations.IsEmpty())
 		{
-			const FVector Origin = ComputeSpawnOriginForPlayer(PlayerIndex);
-			SpawnUnitsForPlayer(*Config, PlayerId, TeamId, Origin, UnitsPerPlayer);
+			SpawnFormationsForPlayer(PlayerId, TeamId, Origin);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("MassWarDemoGameMode: PlayerFormations is empty - set formation templates in the game mode's defaults, or no units are spawned."));
 		}
 	}
 
@@ -176,88 +187,46 @@ void AMassWarDemoGameMode::HandleStartingNewPlayer_Implementation(APlayerControl
 	}
 }
 
-void AMassWarDemoGameMode::SpawnUnitsForPlayer(UMassEntityConfigAsset& Config, uint32 PlayerId, uint8 TeamId, const FVector& Origin, int32 Count)
+void AMassWarDemoGameMode::SpawnFormationsForPlayer(uint32 PlayerId, uint8 TeamId, const FVector& Origin)
 {
 	UWorld* World = GetWorld();
-	UMassSpawnerSubsystem* Spawner = World ? World->GetSubsystem<UMassSpawnerSubsystem>() : nullptr;
-	if (!Spawner)
+	UMassWarSpawnSubsystem* Spawning = World ? World->GetSubsystem<UMassWarSpawnSubsystem>() : nullptr;
+	if (!Spawning)
 	{
-		UE_LOG(LogTemp, Error, TEXT("MassWarDemoGameMode: no UMassSpawnerSubsystem available"));
+		UE_LOG(LogTemp, Error, TEXT("MassWarDemoGameMode: no UMassWarSpawnSubsystem available"));
 		return;
 	}
 
-	int32 UnitIndex = 0;
-	const FMassEntityTemplate& Template = Config.GetOrCreateEntityTemplate(*World);
-
-	TArray<FMassEntityHandle> SpawnedEntities;
-	Spawner->SpawnEntities(Template, static_cast<uint32>(Count), SpawnedEntities);
-
-	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
-	UMassWarUnitRegistrySubsystem* Registry = World->GetSubsystem<UMassWarUnitRegistrySubsystem>();
+	// One formation per template, side by side along Y. Which units, how many and with which weapons is in the template.
+	const int32 FormationCount = PlayerFormations.Num();
+	const float ClusterSpacing = 2.f * SpawnAreaExtent / FMath::Max(1, FormationCount);
 	TArray<FMassEntityHandle>& TeamEntities = EntitiesByTeam.FindOrAdd(TeamId);
 
-	for (const FMassEntityHandle& Entity : SpawnedEntities)
+	int32 Spawned = 0;
+	for (int32 FormationIndex = 0; FormationIndex < FormationCount; ++FormationIndex)
 	{
-		if (Registry)
+		const UMassWarFormationTemplate* Template = PlayerFormations[FormationIndex];
+		if (!Template)
 		{
-			Registry->RegisterUnit(Entity);
+			continue;
 		}
 
-		if (FMassWarTeamFragment* Team = EntityManager.GetFragmentDataPtr<FMassWarTeamFragment>(Entity))
+		const FVector Location = Origin + FVector(0.f, (FormationIndex - (FormationCount - 1) * 0.5f) * ClusterSpacing, 0.f);
+		TArray<FMassEntityHandle> Units;
+		Spawning->SpawnFormationWithUnits(Template->MakeParams(static_cast<int32>(PlayerId), TeamId, Location), Units);
+		Spawned += Units.Num();
+		TeamEntities.Append(Units);
+		for (const FMassEntityHandle& Entity : Units)
 		{
-			Team->TeamId = TeamId;
-		}
-
-		if (FMassWarOwnerFragment* OwnerFragment = EntityManager.GetFragmentDataPtr<FMassWarOwnerFragment>(Entity))
-		{
-			OwnerFragment->OwningPlayerId = PlayerId;
-		}
-
-		if (FTransformFragment* Transform = EntityManager.GetFragmentDataPtr<FTransformFragment>(Entity))
-		{
-			// Each formation spawns as its own cluster, side by side along Y, so the groups start out recognisable.
-			const int32 PerFormation = FMath::Max(1, UnitsPerFormation);
-			const int32 FormationIndex = UnitIndex / PerFormation;
-			const int32 FormationCount = FMath::DivideAndRoundUp(Count, PerFormation);
-			const float ClusterSpacing = 2.f * SpawnAreaExtent / FMath::Max(1, FormationCount);
-			const FVector ClusterCentre(0.f, (FormationIndex - (FormationCount - 1) * 0.5f) * ClusterSpacing, 0.f);
-			const FVector RandomOffset(FMath::FRandRange(-350.f, 350.f), FMath::FRandRange(-350.f, 350.f), 0.f);
-			Transform->SetTransform(FTransform(Origin + ClusterCentre + RandomOffset));
-		}
-
-		if (DebugSampleEntities.Num() < 5)
-		{
-			DebugSampleEntities.Add(Entity);
-		}
-
-		TeamEntities.Add(Entity);
-		++UnitIndex;
-	}
-
-	// Group the new units into formations of UnitsPerFormation; a formation is what the player selects and orders.
-	if (UMassWarFormationSubsystem* Formations = World->GetSubsystem<UMassWarFormationSubsystem>())
-	{
-		const int32 PerFormation = FMath::Max(1, UnitsPerFormation);
-		for (int32 Start = 0; Start < SpawnedEntities.Num(); Start += PerFormation)
-		{
-			const int32 Num = FMath::Min(PerFormation, SpawnedEntities.Num() - Start);
-			Formations->CreateFormation(EntityManager, TConstArrayView<FMassEntityHandle>(SpawnedEntities.GetData() + Start, Num), PlayerId, FormationSettings);
-
-			// Each formation carries its own weapons (spawn-time loadout).
-			if (const UMassWarWeaponSubsystem* Weapons = World->GetSubsystem<UMassWarWeaponSubsystem>(); Weapons && !FormationLoadouts.IsEmpty())
+			if (DebugSampleEntities.Num() < 5)
 			{
-				const FMassWarLoadout& Loadout = FormationLoadouts[(Start / PerFormation) % FormationLoadouts.Num()];
-				for (int32 Offset = 0; Offset < Num; ++Offset)
-				{
-					Weapons->ApplyLoadout(EntityManager, SpawnedEntities[Start + Offset], Loadout);
-				}
+				DebugSampleEntities.Add(Entity);
 			}
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("MassWarDemoGameMode: spawned %d units for player %u (team %d)"), SpawnedEntities.Num(), PlayerId, TeamId);
+	UE_LOG(LogTemp, Log, TEXT("MassWarDemoGameMode: spawned %d units in %d formations for player %u (team %d)"), Spawned, FormationCount, PlayerId, TeamId);
 }
-
 void AMassWarDemoGameMode::DebugAttackNearestEnemy()
 {
 	UMassSpawnerSubsystem* Spawner = GetWorld() ? GetWorld()->GetSubsystem<UMassSpawnerSubsystem>() : nullptr;
@@ -574,7 +543,7 @@ void AMassWarDemoGameMode::LogEntityDiagnostics()
 
 	// What the unit config's visualization trait actually says (as saved in the asset) - the values that
 	// decide whether/when a unit becomes a near-LOD Actor instead of an ISM instance.
-	if (const UMassVisualizationTrait* VisTrait = Cast<UMassVisualizationTrait>(GetOrLoadDemoUnitConfig() ? GetOrLoadDemoUnitConfig()->FindTrait(UMassVisualizationTrait::StaticClass()) : nullptr))
+	if (const UMassVisualizationTrait* VisTrait = Cast<UMassVisualizationTrait>(FindDemoUnitConfig() ? FindDemoUnitConfig()->FindTrait(UMassVisualizationTrait::StaticClass()) : nullptr))
 	{
 		const FMassRepresentationParameters& Params = VisTrait->Params;
 		const FMassVisualizationLODParameters& LOD = VisTrait->LODParams;
@@ -596,7 +565,7 @@ void AMassWarDemoGameMode::LogEntityDiagnostics()
 	}
 
 	// The movement / combat distances as saved in the unit config - the values that decide how close units get.
-	if (UMassEntityConfigAsset* Config = GetOrLoadDemoUnitConfig())
+	if (UMassEntityConfigAsset* Config = FindDemoUnitConfig())
 	{
 		const UMassWarUnitTraitBase* UnitTrait = Cast<UMassWarUnitTraitBase>(Config->FindTrait(UMassWarUnitTraitBase::StaticClass()));
 		const UMassWarCombatTrait* CombatTrait = Cast<UMassWarCombatTrait>(Config->FindTrait(UMassWarCombatTrait::StaticClass()));
