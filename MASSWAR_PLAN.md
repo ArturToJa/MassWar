@@ -347,3 +347,20 @@ far body mesh takes over). Mesh sets are requested during the update loop and bu
 in the access detector). Far animation clips are hold-type aware (`FMassWarFarAnimClip::HoldType`; a unit uses clips for its weapon's stance, falling back to Unarmed-tagged
 ones, then any). Verified headless: hand track exact vs live component; 150 armed units -> 150 weapon pushes per frame. Visual alignment needs the user's eye in the editor.
 Not done: step 5 (gameplay: ammo, reload, weapon choice).
+
+**Integration API - pass A: MassWarSpawning (2026-10-08).** New plugin `MassWarSpawning` (depends on MassWar, MassWarFormations, MassWarWeapons) so integrators do not copy the demo's spawn code.
+`UMassWarSpawnSubsystem` (world subsystem, server/standalone only; on a client every call warns and does nothing): `SpawnFormation(FMassWarFormationSpawnParams)` /
+`SpawnFormationWithUnits` (C++, also returns the entities) / `SpawnFormationFromTemplate(UMassWarFormationTemplate, Player, Team, Location, Yaw)` /
+`SpawnUnits` + `SpawnUnitsWithEntities` (loose units that belong to no formation). Data: `FMassWarUnitSpawnEntry` {Config (Mass entity config), Count, `FMassWarLoadout`},
+`FMassWarFormationSpawnParams` {Units, Settings, OwningPlayerId, TeamId, Location, YawDegrees}, `FMassWarSpawnedFormation` {FormationId, NumUnits}; designers author
+`UMassWarFormationTemplate` data assets (the class ships, instances live in the project). Per roster entry: one batched `SpawnEntities`; each unit gets team, owner, a grid
+position (centred on Location, turned by Yaw, spacing = Settings.Spacing), registry entry and `ApplyLoadout`; then `CreateFormation` over all of them. Warns (once per entry)
+if a config lacks the MassWar Unit or MassWar Weapons trait. Decisions: weapons are NOT entities - "spawning weapons" = assigning the loadout (per-unit weapon state such as ammo
+will go in the loadout fragment in step 5); adding units to an existing formation is not supported (needs the deferred formation merge/split). The demo game mode's
+`SpawnUnitsForPlayer` now just calls `SpawnFormationWithUnits` once per formation (~25 lines instead of ~80). Verified headless: 5x30 formations with correct team/owner/centres,
+mixed roster with two loadouts, null-config entry skipped, loose units, empty roster rejected.
+Planned next: pass B (reusable weapon component for custom visual actors + Blueprint-usable puppet interface), pass C (events/delegates, Blueprint commands and queries, `MassWar.ValidateSetup`
+console command, project settings, quick-start docs).
+Demo game mode (2026-10-08): `AMassWarDemoGameMode::PlayerFormations` (`TArray<UMassWarFormationTemplate*>`, set in the Blueprint subclass defaults) - every joining player gets one formation per template, side by side
+(`SpawnFormationsForPlayer`, via `SpawnFormationWithUnits(Template->MakeParams(...))`). Empty list = the old fallback (`DemoUnitConfigPath` + `UnitsPerPlayer` / `UnitsPerFormation` / `FormationLoadouts`). Verified headless with two
+transient templates: formations of 20 and 25 units with their own weapons.

@@ -1,0 +1,42 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "MassWarSpawning",
+	"Description": "MassWar feature plugin: one-call spawning of formations, their units and the units' weapons (SpawnFormation, SpawnUnits), plus a formation template data asset for designers. Depends on MassWar core, Formations and Weapons.",
+	"Category": "MassWar",
+	"CreatedBy": "ArturToJa",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "MassWarSpawning",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "MassWar",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarFormations",
+			"Enabled": true
+		},
+		{
+			"Name": "MassWarWeapons",
+			"Enabled": true
+		},
+		{
+			"Name": "MassGameplay",
+			"Enabled": true
+		}
+	]
+}

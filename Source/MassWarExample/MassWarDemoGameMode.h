@@ -3,14 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Formation/MassWarFormationTypes.h"
-#include "Weapons/MassWarWeaponSubsystem.h"
 #include "GameFramework/GameModeBase.h"
 #include "MassEntityTypes.h"
 #include "MassEntityHandle.h"
 #include "MassWarDemoGameMode.generated.h"
 
 class UMassEntityConfigAsset;
+class UMassWarFormationTemplate;
 struct IConsoleCommand;
 
 /**
@@ -36,24 +35,11 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 protected:
-	/** Entity config asset every player's units are spawned from; team/owner are assigned per-entity after spawning. */
-	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
-	FSoftObjectPath DemoUnitConfigPath;
-
-	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
-	int32 UnitsPerPlayer = 150;
-	/** How many of a player's units make up one formation (each formation spawns as its own cluster). */
-	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
-	int32 UnitsPerFormation = 30;
-
-	/** Shape and spacing the spawned formations use when they get a Move order. */
-	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
-	FMassWarFormationSettings FormationSettings;
-
-	/** Weapons the spawned formations carry: formation 0 gets entry 0, formation 1 entry 1, and so on (wrapping around).
-	 *  Empty = every unit keeps its unit type's default loadout (the MassWar Weapons trait). */
-	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
-	TArray<FMassWarLoadout> FormationLoadouts;
+	/** The formations every joining player starts with: one spawned from each template (data assets of class
+	 *  MassWarFormationTemplate - set them in the Blueprint subclass's defaults), side by side. Each template says which
+	 *  units, how many, with which weapons, and the formation shape and spacing. Nobody is spawned if the list is empty. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MassWar Demo")
+	TArray<TObjectPtr<UMassWarFormationTemplate>> PlayerFormations;
 
 
 	UPROPERTY(EditDefaultsOnly, Category = "MassWar Demo")
@@ -78,9 +64,11 @@ private:
 	 *  further out for every second player so slots never overlap. */
 	FVector ComputeSpawnOriginForPlayer(int32 PlayerIndex) const;
 
-	UMassEntityConfigAsset* GetOrLoadDemoUnitConfig();
+	/** The unit config of the first roster entry of the first template that has one - only used by the diagnostics. */
+	UMassEntityConfigAsset* FindDemoUnitConfig() const;
 
-	void SpawnUnitsForPlayer(UMassEntityConfigAsset& Config, uint32 PlayerId, uint8 TeamId, const FVector& Origin, int32 Count);
+	/** Spawns one formation per PlayerFormations template for the player, side by side around Origin. */
+	void SpawnFormationsForPlayer(uint32 PlayerId, uint8 TeamId, const FVector& Origin);
 
 	/** Dumps LOD/representation/transform state for a handful of spawned entities a couple seconds
 	 *  after spawn, to see directly (via log) whether Mass ever considers them renderable, instead of
@@ -117,9 +105,6 @@ private:
 	IConsoleCommand* DebugFocusConsoleCommand = nullptr;
 	IConsoleCommand* DebugWeaponConsoleCommand = nullptr;
 	FTimerHandle DebugHUDTimerHandle;
-
-	UPROPERTY()
-	TObjectPtr<UMassEntityConfigAsset> CachedDemoUnitConfig;
 
 	/** Every spawned entity, grouped by team - multiple players (and, later, bots) can share a team. */
 	TMap<uint8, TArray<FMassEntityHandle>> EntitiesByTeam;
