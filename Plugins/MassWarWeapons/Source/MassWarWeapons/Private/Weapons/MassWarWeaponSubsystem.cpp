@@ -5,6 +5,7 @@
 #include "Weapons/MassWarWeaponCatalog.h"
 #include "Weapons/MassWarAmmoDefinition.h"
 #include "Stats/MassWarStatSubsystem.h"
+#include "Fragments/MassWarAmmoUtil.h"
 #include "Stats/MassWarStatSet.h"
 #include "MassEntityView.h"
 #include "Engine/World.h"
@@ -235,6 +236,16 @@ bool UMassWarWeaponSubsystem::SetAmmo(FMassEntityManager& EntityManager, FMassEn
 		return false;
 	}
 	Fragment->AmmoIds[SlotIndex] = FindAmmoId(Ammo);
+	// New ammo goes into a fresh magazine: that slot's ammunition is set up again the next time it is looked at.
+	if (FMassWarAmmoFragment* AmmoState = EntityManager.GetFragmentDataPtr<FMassWarAmmoFragment>(Entity))
+	{
+		AmmoState->Loaded[SlotIndex] = FMassWarAmmoFragment::NotInitialised;
+		if (AmmoState->ReloadingSlot == SlotIndex)
+		{
+			AmmoState->ReloadingSlot = FMassWarAmmoFragment::NotReloading;
+			AmmoState->ReloadRemaining = 0.f;
+		}
+	}
 	RefreshStats(EntityManager, Entity);
 	return true;
 }
@@ -245,4 +256,21 @@ void UMassWarWeaponSubsystem::RefreshStats(FMassEntityManager& EntityManager, FM
 	{
 		Stats->RefreshProfile(FMassEntityView(EntityManager, Entity));
 	}
+}
+
+bool UMassWarWeaponSubsystem::Reload(FMassEntityManager& EntityManager, FMassEntityHandle Entity) const
+{
+	if (!EntityManager.IsEntityValid(Entity))
+	{
+		return false;
+	}
+	FMassWarAmmoFragment* Ammo = EntityManager.GetFragmentDataPtr<FMassWarAmmoFragment>(Entity);
+	const FMassWarLoadoutFragment* Loadout = EntityManager.GetFragmentDataPtr<FMassWarLoadoutFragment>(Entity);
+	const FMassWarStatProfileFragment* Profile = EntityManager.GetFragmentDataPtr<FMassWarStatProfileFragment>(Entity);
+	const UMassWarStatSubsystem* Stats = GetWorld() ? GetWorld()->GetSubsystem<UMassWarStatSubsystem>() : nullptr;
+	if (!Ammo || !Loadout || !Profile || !Stats)
+	{
+		return false;
+	}
+	return MassWarAmmo::TryStartReload(*Ammo, Loadout->ActiveSlot, Stats->GetView(), Profile->ProfileIndex);
 }

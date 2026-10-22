@@ -85,6 +85,9 @@ public:
 	 *  Changes the unit's stats if that weapon is in hand. */
 	bool SetAmmo(FMassEntityManager& EntityManager, FMassEntityHandle Entity, EMassWarWeaponSlot Slot, const UMassWarAmmoDefinition* Ammo) const;
 
+	/** Starts a reload of the weapon in hand, on command (it also happens by itself when the magazine runs dry, if the AutoReload stat allows). False if there is nothing to reload:
+	 *  no weapon with a magazine, a full magazine, a reload already running, or no reserve ammo left. Server / standalone. */
+	bool Reload(FMassEntityManager& EntityManager, FMassEntityHandle Entity) const;
 	/** Replaces the ammo catalog from code instead of the project setting (tests, mods). */
 	void SetAmmoCatalogOverride(UMassWarAmmoCatalog* InCatalog);
 	/** Replaces the catalog from code instead of the project setting (tests, mods). */

@@ -28,6 +28,9 @@ void UMassWarPuppetAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		UnitDeathVariant = State.DeathVariant;
 		ActiveWeaponHoldType = State.HoldType;
 		bHasWeapon = State.bHasWeapon;
+		bIsReloading = State.bIsReloading;
+		LoadedRounds = State.LoadedRounds;
+		ReserveRounds = State.ReserveRounds;
 		ActiveWeapon = State.ActiveWeapon;
 	}
 }

@@ -29,6 +29,12 @@ enum class EMassWarStat : uint8
 	AttackRange,
 	AttackInterval,
 	AttackNoiseRange,
+	// Ammunition (MagazineSize 0 = the weapon has no ammo limit and never reloads)
+	MagazineSize,
+	ReserveAmmo,
+	ReloadTime,
+	AmmoPerAttack,
+	AutoReload,
 
 	Count UMETA(Hidden)
 };

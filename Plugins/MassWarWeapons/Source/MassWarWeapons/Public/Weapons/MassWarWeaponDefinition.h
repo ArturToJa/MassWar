@@ -83,6 +83,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Visual")
 	TArray<TObjectPtr<UAnimMontage>> AttackMontages;
 
+	/** Played when a unit starts reloading this weapon; if empty, the unit visual's own reload montages are used. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Visual")
+	TArray<TObjectPtr<UAnimMontage>> ReloadMontages;
+
 	// ---- Instanced (middle distance) visuals ----
 	//
 	// Units that are not close enough for a full actor are instanced meshes. Their weapon is this same Mesh drawn as one

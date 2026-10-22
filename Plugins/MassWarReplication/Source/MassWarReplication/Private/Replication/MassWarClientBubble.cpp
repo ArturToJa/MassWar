@@ -35,20 +35,21 @@ namespace
 #endif // UE_REPLICATION_COMPILE_CLIENT_CODE
 
 #if UE_REPLICATION_COMPILE_SERVER_CODE
-void FMassWarClientBubbleHandler::SetAgentDynamicState(const FMassReplicatedAgentHandle Handle, const uint8 LifeState, const uint8 AttackCounter, const uint32 FormationId, const uint32 LoadoutPacked, const uint32 AmmoPacked, const uint32 StatSetsPacked)
+void FMassWarClientBubbleHandler::SetAgentDynamicState(const FMassReplicatedAgentHandle Handle, const uint8 LifeState, const uint8 AttackCounter, const uint32 FormationId, const uint32 LoadoutPacked, const uint32 AmmoPacked, const uint32 AmmoStatePacked, const uint32 StatSetsPacked)
 {
 	check(AgentHandleManager.IsValidHandle(Handle));
 
 	const int32 AgentsIdx = AgentLookupArray[Handle.GetIndex()].AgentsIdx;
 	FMassWarFastArrayItem& Item = (*Agents)[AgentsIdx];
 
-	if (Item.Agent.LifeState != LifeState || Item.Agent.AttackCounter != AttackCounter || Item.Agent.FormationId != FormationId || Item.Agent.LoadoutPacked != LoadoutPacked || Item.Agent.AmmoPacked != AmmoPacked || Item.Agent.StatSetsPacked != StatSetsPacked)
+	if (Item.Agent.LifeState != LifeState || Item.Agent.AttackCounter != AttackCounter || Item.Agent.FormationId != FormationId || Item.Agent.LoadoutPacked != LoadoutPacked || Item.Agent.AmmoPacked != AmmoPacked || Item.Agent.AmmoStatePacked != AmmoStatePacked || Item.Agent.StatSetsPacked != StatSetsPacked)
 	{
 		Item.Agent.LifeState = LifeState;
 		Item.Agent.AttackCounter = AttackCounter;
 		Item.Agent.FormationId = FormationId;
 		Item.Agent.LoadoutPacked = LoadoutPacked;
 		Item.Agent.AmmoPacked = AmmoPacked;
+		Item.Agent.AmmoStatePacked = AmmoStatePacked;
 		Item.Agent.StatSetsPacked = StatSetsPacked;
 		Serializer->MarkItemDirty(Item);
 	}
@@ -131,6 +132,14 @@ void FMassWarClientBubbleHandler::PostReplicatedAdd(const TArrayView<int32> Adde
 			bLoadoutChanged = Before != (Loadout->Pack() ^ Loadout->PackAmmo());
 		}
 
+		if (FMassWarAmmoFragment* AmmoState = EntityView.GetFragmentDataPtr<FMassWarAmmoFragment>())
+		{
+			if (const FMassWarLoadoutFragment* Loadout = EntityView.GetFragmentDataPtr<FMassWarLoadoutFragment>())
+			{
+				AmmoState->Unpack(ReplicatedEntity.AmmoStatePacked, Loadout->ActiveSlot);
+			}
+		}
+
 		ApplyReplicatedStatSets(Serializer ? Serializer->GetWorld() : nullptr, EntityView, ReplicatedEntity.StatSetsPacked, bLoadoutChanged);
 
 		// Initialize the smoothing target to the just-placed position/rotation so the first update we
@@ -206,6 +215,14 @@ void FMassWarClientBubbleHandler::PostReplicatedChangeEntity(const FMassEntityVi
 		Loadout->Unpack(Item.LoadoutPacked);
 		Loadout->UnpackAmmo(Item.AmmoPacked);
 		bLoadoutChanged = Before != (Loadout->Pack() ^ Loadout->PackAmmo());
+	}
+
+	if (FMassWarAmmoFragment* AmmoState = EntityView.GetFragmentDataPtr<FMassWarAmmoFragment>())
+	{
+		if (const FMassWarLoadoutFragment* Loadout = EntityView.GetFragmentDataPtr<FMassWarLoadoutFragment>())
+		{
+			AmmoState->Unpack(Item.AmmoStatePacked, Loadout->ActiveSlot);
+		}
 	}
 
 	ApplyReplicatedStatSets(Serializer ? Serializer->GetWorld() : nullptr, EntityView, Item.StatSetsPacked, bLoadoutChanged);

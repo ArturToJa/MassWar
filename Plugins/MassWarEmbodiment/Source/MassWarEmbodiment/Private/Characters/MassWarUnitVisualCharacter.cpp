@@ -133,6 +133,23 @@ void AMassWarUnitVisualCharacter::PlayAttack(const uint8 AttackCounter, const FM
 	OnUnitAttacked();
 }
 
+void AMassWarUnitVisualCharacter::PlayReload(const FMassEntityHandle Entity)
+{
+	const UMassWarWeaponDefinition* Weapon = VisualState.ActiveWeapon;
+	const TArray<TObjectPtr<UAnimMontage>>& Montages = (Weapon && Weapon->ReloadMontages.Num() > 0) ? Weapon->ReloadMontages : ReloadMontages;
+	if (Montages.Num() == 0)
+	{
+		return;
+	}
+	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
+	{
+		if (UAnimMontage* Montage = Montages[GetTypeHash(Entity) % static_cast<uint32>(Montages.Num())])
+		{
+			AnimInstance->Montage_Play(Montage);
+		}
+	}
+}
+
 void AMassWarUnitVisualCharacter::StopAttackMontages()
 {
 	if (UAnimInstance* AnimInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr)
@@ -199,6 +216,16 @@ void AMassWarUnitVisualCharacter::SyncFromEntity(FMassEntityHandle Entity, const
 		StopAttackMontages();
 	}
 	LastAttackCounter = EntityState.AttackCounter;
+
+	// Reload animation: played at the moment a reload starts on a unit we have been showing continuously.
+	if (bContinuous && !bIsDying && EntityState.bIsReloading && !bWasReloading)
+	{
+		PlayReload(Entity);
+	}
+	bWasReloading = EntityState.bIsReloading && !bIsDying;
+	VisualState.bIsReloading = bWasReloading;
+	VisualState.LoadedRounds = EntityState.LoadedRounds;
+	VisualState.ReserveRounds = EntityState.ReserveRounds;
 
 	// Written every sync, so a pooled puppet handed a living unit after a dead one drops the dead state.
 	VisualState.bIsDead = bIsDying;

@@ -305,6 +305,73 @@ struct MASSWAR_API FMassWarLoadoutFragment : public FMassFragment
 	}
 };
 
+/**
+ * How many rounds a unit's weapons have loaded and in reserve, and whether it is reloading. Only meaningful for a weapon whose
+ * MagazineSize stat is above 0 (a weapon with 0 has no ammo limit and this fragment is left alone). The numbers that drive it -
+ * magazine size, reserve, reload time, rounds per attack, auto reload - are stats, so weapons, ammo and upgrades set them.
+ * A slot starts "not initialised" and is filled (full magazine, full reserve) the first time its weapon is in hand.
+ * Server-owned; the active slot's numbers and the reloading flag are replicated for HUDs and reload animations.
+ */
+USTRUCT()
+struct MASSWAR_API FMassWarAmmoFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	static constexpr uint16 NotInitialised = 0xFFFF;
+	static constexpr uint8 NotReloading = 0xFF;
+
+	/** Rounds in the magazine of each slot's weapon. */
+	UPROPERTY()
+	uint16 Loaded[MassWarWeaponSlotCount] = { NotInitialised, NotInitialised, NotInitialised };
+
+	/** Rounds in reserve for each slot's weapon (ignored while that weapon's ReserveAmmo stat is negative = unlimited). */
+	UPROPERTY()
+	uint16 Reserve[MassWarWeaponSlotCount] = { 0, 0, 0 };
+
+	/** Seconds left of the reload in progress. */
+	UPROPERTY(Transient)
+	float ReloadRemaining = 0.f;
+
+	/** The slot being reloaded, NotReloading if none. */
+	UPROPERTY(Transient)
+	uint8 ReloadingSlot = NotReloading;
+
+	bool IsReloading() const { return ReloadingSlot != NotReloading; }
+
+	/** Loaded / reserve / reloading of one slot in one value, for replication (Loaded 13 bits, Reserve 18 bits, reloading 1 bit). */
+	uint32 Pack(uint8 Slot) const
+	{
+		if (Slot >= MassWarWeaponSlotCount)
+		{
+			return 0;
+		}
+		const uint32 PackedLoaded = Loaded[Slot] == NotInitialised ? 0x1FFFu : FMath::Min<uint32>(Loaded[Slot], 0x1FFEu);
+		const uint32 PackedReserve = FMath::Min<uint32>(Reserve[Slot], 0x3FFFFu);
+		return PackedLoaded | (PackedReserve << 13) | (ReloadingSlot == Slot ? 0x80000000u : 0u);
+	}
+
+	void Unpack(uint32 Packed, uint8 Slot)
+	{
+		if (Slot >= MassWarWeaponSlotCount)
+		{
+			return;
+		}
+		const uint32 PackedLoaded = Packed & 0x1FFFu;
+		Loaded[Slot] = PackedLoaded == 0x1FFFu ? NotInitialised : static_cast<uint16>(PackedLoaded);
+		Reserve[Slot] = static_cast<uint16>((Packed >> 13) & 0x3FFFFu);
+		const bool bReloading = (Packed & 0x80000000u) != 0;
+		if (bReloading)
+		{
+			ReloadingSlot = Slot;
+			ReloadRemaining = FMath::Max(ReloadRemaining, 0.01f);
+		}
+		else if (ReloadingSlot == Slot)
+		{
+			ReloadingSlot = NotReloading;
+			ReloadRemaining = 0.f;
+		}
+	}
+};
 USTRUCT()
 struct MASSWAR_API FMassWarNetIdFragment : public FMassFragment
 {

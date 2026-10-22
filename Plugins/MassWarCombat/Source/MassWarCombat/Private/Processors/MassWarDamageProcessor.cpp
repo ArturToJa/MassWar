@@ -7,6 +7,7 @@
 #include "Fragments/MassWarCombatFragments.h"
 #include "Stats/MassWarStatSubsystem.h"
 #include "Rules/MassWarDamageRule.h"
+#include "Fragments/MassWarAmmoUtil.h"
 #include "UnitBrain/MassWarUnitStateView.h"
 #include "Fragments/MassWarPerceptionFragments.h"
 #include "Perception/MassWarPerceptionSubsystem.h"
@@ -32,6 +33,9 @@ void UMassWarDamageProcessor::ConfigureQueries(const TSharedRef<FMassEntityManag
 	// Not read here - declared because a landed attack writes the victim's perception (see ReportDamage), which tells
 	// Mass this processor must not run at the same time as anything else touching perception data.
 	EntityQuery.AddRequirement<FMassWarPerceptionFragment>(EMassFragmentAccess::ReadWrite, EMassFragmentPresence::Optional);
+	// Only units whose unit type carries weapons have ammunition.
+	EntityQuery.AddRequirement<FMassWarAmmoFragment>(EMassFragmentAccess::ReadWrite, EMassFragmentPresence::Optional);
+	EntityQuery.AddRequirement<FMassWarLoadoutFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 }
 
 void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -54,6 +58,8 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 		const TArrayView<FMassWarOrderFragment> Orders = Context.GetMutableFragmentView<FMassWarOrderFragment>();
 		const TArrayView<FMassWarAttackCooldownFragment> CooldownList = Context.GetMutableFragmentView<FMassWarAttackCooldownFragment>();
 		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
+		const TArrayView<FMassWarAmmoFragment> AmmoList = Context.GetMutableFragmentView<FMassWarAmmoFragment>();
+		const TConstArrayView<FMassWarLoadoutFragment> LoadoutList = Context.GetFragmentView<FMassWarLoadoutFragment>();
 		const TConstArrayView<FTransformFragment> Transforms = Context.GetFragmentView<FTransformFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList = Context.GetMutableFragmentView<FMassWarAttackFeedbackFragment>();
@@ -111,7 +117,37 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 				continue;
 			}
 
+			// A weapon with a magazine can only attack with rounds in it: not while reloading, and an empty magazine starts a
+			// reload (if the unit reloads by itself) instead of an attack.
+			int32 AmmoCost = 0;
+			FMassWarAmmoFragment* Ammo = AmmoList.IsEmpty() || LoadoutList.IsEmpty() ? nullptr : &AmmoList[It];
+			const uint8 AmmoSlot = Ammo ? LoadoutList[It].ActiveSlot : static_cast<uint8>(MassWarWeaponSlotCount);
+			if (Ammo && AmmoSlot < MassWarWeaponSlotCount && Stats.Get(Profile, EMassWarStat::MagazineSize) >= 0.5f)
+			{
+				AmmoCost = FMath::Max(1, FMath::RoundToInt(Stats.Get(Profile, EMassWarStat::AmmoPerAttack)));
+				if (Ammo->IsReloading() || Ammo->Loaded[AmmoSlot] == FMassWarAmmoFragment::NotInitialised)
+				{
+					continue;
+				}
+				if (Ammo->Loaded[AmmoSlot] < AmmoCost)
+				{
+					if (Stats.Get(Profile, EMassWarStat::AutoReload) >= 0.5f)
+					{
+						MassWarAmmo::TryStartReload(*Ammo, AmmoSlot, Stats, Profile);
+					}
+					continue;
+				}
+			}
+
 			Cooldown.TimeSinceLastAttack = 0.f;
+			if (AmmoCost > 0)
+			{
+				Ammo->Loaded[AmmoSlot] = static_cast<uint16>(Ammo->Loaded[AmmoSlot] - AmmoCost);
+				if (Ammo->Loaded[AmmoSlot] == 0 && Stats.Get(Profile, EMassWarStat::AutoReload) >= 0.5f)
+				{
+					MassWarAmmo::TryStartReload(*Ammo, AmmoSlot, Stats, Profile);
+				}
+			}
 			float AttackDamage = Stats.Get(Profile, EMassWarStat::AttackDamage);
 			if (DamageRule)
 			{

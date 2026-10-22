@@ -26,6 +26,11 @@ namespace MassWarStatTags
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(AttackRange, "MassWar.Stat.AttackRange", "Distance within which a unit can attack its target.")
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(AttackInterval, "MassWar.Stat.AttackInterval", "Seconds between attacks.")
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(AttackNoiseRange, "MassWar.Stat.AttackNoiseRange", "How far enemies can hear this unit's attacks.")
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(MagazineSize, "MassWar.Stat.MagazineSize", "Rounds the weapon holds before it must reload. 0 = no ammo limit, never reloads.")
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(ReserveAmmo, "MassWar.Stat.ReserveAmmo", "Rounds carried in reserve for reloading. Negative = unlimited.")
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(ReloadTime, "MassWar.Stat.ReloadTime", "Seconds a reload takes.")
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(AmmoPerAttack, "MassWar.Stat.AmmoPerAttack", "Rounds one attack uses.")
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(AutoReload, "MassWar.Stat.AutoReload", "1 = the unit reloads by itself when the magazine runs empty, 0 = only on command.")
 
 	struct FBuiltIn
 	{
@@ -49,6 +54,11 @@ namespace MassWarStatTags
 			{ &AttackRange, 800.f },
 			{ &AttackInterval, 1.f },
 			{ &AttackNoiseRange, 2500.f },
+			{ &MagazineSize, 0.f },
+			{ &ReserveAmmo, -1.f },
+			{ &ReloadTime, 2.f },
+			{ &AmmoPerAttack, 1.f },
+			{ &AutoReload, 1.f },
 		};
 		static_assert(UE_ARRAY_COUNT(BuiltIns) == static_cast<int32>(EMassWarStat::Count), "one entry per EMassWarStat");
 		return BuiltIns[static_cast<int32>(Stat)];
