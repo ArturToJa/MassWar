@@ -5,6 +5,7 @@
 #include "Engine/DeveloperSettings.h"
 #include "Stats/MassWarStatTypes.h"
 #include "Stats/MassWarStatSet.h"
+#include "Stats/MassWarStatCalculator.h"
 #include "MassWarStatSettings.generated.h"
 
 /**
@@ -30,4 +31,12 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Config, Category = "Stats")
 	TArray<TSoftObjectPtr<UMassWarStatSet>> StatSetCatalog;
+
+	/**
+	 * Calculators that work out stats from other stats (your own C++ or Blueprint subclasses of MassWarStatCalculator), run in this
+	 * order whenever a stat profile is worked out - e.g. attack range that grows with the ammo's muzzle velocity. Each writes the
+	 * stat named by its Output Stat. Runs once per distinct stat setup, never per unit or per frame.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Stats")
+	TArray<TSubclassOf<UMassWarStatCalculator>> StatCalculators;
 };

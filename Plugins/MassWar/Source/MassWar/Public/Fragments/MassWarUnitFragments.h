@@ -277,7 +277,21 @@ struct MASSWAR_API FMassWarLoadoutFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "MassWar|Weapons")
 	uint8 ActiveSlot = NoActiveSlot;
 
+	/** The ammo loaded in each slot's weapon (ammo catalog id, 0 = none). Its stat set is part of the unit's stats while that weapon is in hand. */
+	UPROPERTY(VisibleAnywhere, Category = "MassWar|Weapons")
+	uint8 AmmoIds[MassWarWeaponSlotCount] = { 0, 0, 0 };
+
 	uint8 GetActiveWeaponId() const { return ActiveSlot < MassWarWeaponSlotCount ? WeaponIds[ActiveSlot] : 0; }
+	uint8 GetActiveAmmoId() const { return ActiveSlot < MassWarWeaponSlotCount ? AmmoIds[ActiveSlot] : 0; }
+
+	/** The three ammo ids in one value, for replication. */
+	uint32 PackAmmo() const { return static_cast<uint32>(AmmoIds[0]) | (static_cast<uint32>(AmmoIds[1]) << 8) | (static_cast<uint32>(AmmoIds[2]) << 16); }
+	void UnpackAmmo(uint32 Packed)
+	{
+		AmmoIds[0] = static_cast<uint8>(Packed);
+		AmmoIds[1] = static_cast<uint8>(Packed >> 8);
+		AmmoIds[2] = static_cast<uint8>(Packed >> 16);
+	}
 
 	/** All four bytes in one value, for replication. */
 	uint32 Pack() const { return static_cast<uint32>(WeaponIds[0]) | (static_cast<uint32>(WeaponIds[1]) << 8) | (static_cast<uint32>(WeaponIds[2]) << 16) | (static_cast<uint32>(ActiveSlot) << 24); }

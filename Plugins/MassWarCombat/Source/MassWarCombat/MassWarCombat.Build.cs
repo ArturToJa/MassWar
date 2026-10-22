@@ -19,6 +19,7 @@ public class MassWarCombat : ModuleRules
 				"MassSpawner",
 				"MassWar",
 				"MassWarPerception",
+				"DeveloperSettings",
 			}
 			);
 	}

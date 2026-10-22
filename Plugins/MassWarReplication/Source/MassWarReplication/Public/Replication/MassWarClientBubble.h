@@ -30,7 +30,7 @@ public:
 
 	/** Updates the life state, attack counter, formation id, loadout and stat sets sent for an already-added agent, marking it
 	 *  dirty only if any changed. */
-	void SetAgentDynamicState(FMassReplicatedAgentHandle Handle, uint8 LifeState, uint8 AttackCounter, uint32 FormationId, uint32 LoadoutPacked, uint32 StatSetsPacked);
+	void SetAgentDynamicState(FMassReplicatedAgentHandle Handle, uint8 LifeState, uint8 AttackCounter, uint32 FormationId, uint32 LoadoutPacked, uint32 AmmoPacked, uint32 StatSetsPacked);
 #endif // UE_REPLICATION_COMPILE_SERVER_CODE
 
 protected:

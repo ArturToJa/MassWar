@@ -10,6 +10,8 @@ class UStaticMesh;
 class UAnimMontage;
 class UMaterialInterface;
 class UNiagaraSystem;
+class UMassWarStatSet;
+class UMassWarAmmoDefinition;
 
 /**
  * How a unit holds a weapon - the one thing an animation blueprint needs to pick the right locomotion, idle and
@@ -49,6 +51,21 @@ public:
 	/** The stance animations to use while this weapon is in hand. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weapon")
 	EMassWarWeaponHoldType HoldType = EMassWarWeaponHoldType::Rifle;
+
+	// ---- Gameplay ----
+
+	/** The unit's stats while this weapon is in hand: damage, range, rate of fire... - whatever the project wants this weapon to
+	 *  change (a stat set, see MassWarStats). Applied on top of the unit type's own values. Leave empty for a weapon that changes nothing. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+	TObjectPtr<UMassWarStatSet> StatSet;
+
+	/** The ammo this weapon fires unless a loadout says otherwise. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+	TObjectPtr<UMassWarAmmoDefinition> DefaultAmmo;
+
+	/** The ammo this weapon accepts. Empty = any ammo. A loadout that asks for other ammo gets the default instead. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Gameplay")
+	TArray<TObjectPtr<UMassWarAmmoDefinition>> AllowedAmmo;
 
 	// ---- Visuals ----
 

@@ -3,6 +3,11 @@
 #include "Weapons/MassWarWeaponSubsystem.h"
 #include "Weapons/MassWarWeaponDefinition.h"
 #include "Weapons/MassWarWeaponCatalog.h"
+#include "Weapons/MassWarAmmoDefinition.h"
+#include "Stats/MassWarStatSubsystem.h"
+#include "Stats/MassWarStatSet.h"
+#include "MassEntityView.h"
+#include "Engine/World.h"
 #include "MassEntityManager.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MassWarWeaponSubsystem)
@@ -20,19 +25,62 @@ UMassWarWeaponDefinition* FMassWarLoadout::Get(EMassWarWeaponSlot Slot) const
 	return nullptr;
 }
 
+UMassWarAmmoDefinition* FMassWarLoadout::GetAmmo(EMassWarWeaponSlot Slot) const
+{
+	switch (Slot)
+	{
+	case EMassWarWeaponSlot::Primary: return PrimaryAmmo;
+	case EMassWarWeaponSlot::Secondary: return SecondaryAmmo;
+	case EMassWarWeaponSlot::Special: return SpecialAmmo;
+	}
+	return nullptr;
+}
+
 void UMassWarWeaponSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
+	Collection.InitializeDependency<UMassWarStatSubsystem>();
 	Super::Initialize(Collection);
 
 	if (const UMassWarWeaponSettings* Settings = GetDefault<UMassWarWeaponSettings>())
 	{
 		Catalog = Settings->Catalog.IsNull() ? nullptr : Settings->Catalog.LoadSynchronous();
+		AmmoCatalog = Settings->AmmoCatalog.IsNull() ? nullptr : Settings->AmmoCatalog.LoadSynchronous();
 	}
 	if (!Catalog)
 	{
 		UE_LOG(LogMassWarWeapons, Log, TEXT("No weapon catalog set (Project Settings > Plugins > MassWar Weapons): units will carry no weapons."));
 	}
 	RebuildLookup();
+
+	// A unit's stats include those of the weapon in its hand and of the ammo loaded in it.
+	if (UMassWarStatSubsystem* Stats = GetWorld() ? GetWorld()->GetSubsystem<UMassWarStatSubsystem>() : nullptr)
+	{
+		Stats->RegisterSourceCollector(TEXT("MassWarWeapons"), [this](const FMassEntityView& Unit, TArray<const UMassWarStatSet*>& OutStatSets)
+		{
+			const FMassWarLoadoutFragment* Loadout = Unit.GetFragmentDataPtr<FMassWarLoadoutFragment>();
+			if (!Loadout)
+			{
+				return;
+			}
+			if (const UMassWarWeaponDefinition* Weapon = GetDefinition(Loadout->GetActiveWeaponId()))
+			{
+				OutStatSets.Add(Weapon->StatSet);
+			}
+			if (const UMassWarAmmoDefinition* Ammo = GetAmmo(Loadout->GetActiveAmmoId()))
+			{
+				OutStatSets.Add(Ammo->StatSet);
+			}
+		});
+	}
+}
+
+void UMassWarWeaponSubsystem::Deinitialize()
+{
+	if (UMassWarStatSubsystem* Stats = GetWorld() ? GetWorld()->GetSubsystem<UMassWarStatSubsystem>() : nullptr)
+	{
+		Stats->UnregisterSourceCollector(TEXT("MassWarWeapons"));
+	}
+	Super::Deinitialize();
 }
 
 void UMassWarWeaponSubsystem::SetCatalogOverride(UMassWarWeaponCatalog* InCatalog)
@@ -41,8 +89,44 @@ void UMassWarWeaponSubsystem::SetCatalogOverride(UMassWarWeaponCatalog* InCatalo
 	RebuildLookup();
 }
 
+void UMassWarWeaponSubsystem::SetAmmoCatalogOverride(UMassWarAmmoCatalog* InCatalog)
+{
+	AmmoCatalog = InCatalog;
+	RebuildLookup();
+}
+
+const UMassWarAmmoDefinition* UMassWarWeaponSubsystem::GetAmmo(const uint8 AmmoId) const
+{
+	return (AmmoId > 0 && AmmoById.IsValidIndex(AmmoId - 1)) ? AmmoById[AmmoId - 1].Get() : nullptr;
+}
+
+uint8 UMassWarWeaponSubsystem::FindAmmoId(const UMassWarAmmoDefinition* Ammo) const
+{
+	if (!Ammo)
+	{
+		return 0;
+	}
+	const int32 Index = AmmoById.IndexOfByKey(Ammo);
+	if (Index == INDEX_NONE)
+	{
+		UE_LOG(LogMassWarWeapons, Warning, TEXT("Ammo %s is not in the ammo catalog - the unit will not use it."), *GetNameSafe(Ammo));
+		return 0;
+	}
+	return static_cast<uint8>(Index + 1);
+}
+
 void UMassWarWeaponSubsystem::RebuildLookup()
 {
+	AmmoById.Reset();
+	if (AmmoCatalog)
+	{
+		const int32 NumAmmo = FMath::Min(AmmoCatalog->Ammo.Num(), 255);
+		for (int32 Index = 0; Index < NumAmmo; ++Index)
+		{
+			AmmoById.Add(AmmoCatalog->Ammo[Index]);
+		}
+	}
+
 	ById.Reset();
 	if (!Catalog)
 	{
@@ -90,6 +174,15 @@ FMassWarLoadoutFragment UMassWarWeaponSubsystem::MakeFragment(const FMassWarLoad
 				*UEnum::GetValueAsString(Weapon->Slot), *UEnum::GetValueAsString(Slot));
 		}
 		Fragment.WeaponIds[SlotIndex] = FindId(Weapon);
+
+		// The requested ammo if the weapon accepts it, else the weapon's default.
+		const UMassWarAmmoDefinition* Ammo = Loadout.GetAmmo(Slot);
+		if (Weapon && Ammo && Weapon->AllowedAmmo.Num() > 0 && !Weapon->AllowedAmmo.Contains(Ammo))
+		{
+			UE_LOG(LogMassWarWeapons, Warning, TEXT("Weapon %s does not accept ammo %s - using its default ammo."), *GetNameSafe(Weapon), *GetNameSafe(Ammo));
+			Ammo = nullptr;
+		}
+		Fragment.AmmoIds[SlotIndex] = FindAmmoId(Weapon ? (Ammo ? Ammo : Weapon->DefaultAmmo.Get()) : nullptr);
 	}
 	// In hand: the first slot that holds something.
 	for (int32 SlotIndex = 0; SlotIndex < MassWarWeaponSlotCount; ++SlotIndex)
@@ -111,6 +204,7 @@ bool UMassWarWeaponSubsystem::ApplyLoadout(FMassEntityManager& EntityManager, FM
 		return false;
 	}
 	*Fragment = MakeFragment(Loadout);
+	RefreshStats(EntityManager, Entity);
 	return true;
 }
 
@@ -123,5 +217,32 @@ bool UMassWarWeaponSubsystem::SetActiveSlot(FMassEntityManager& EntityManager, F
 		return false;
 	}
 	Fragment->ActiveSlot = static_cast<uint8>(SlotIndex);
+	RefreshStats(EntityManager, Entity);
 	return true;
+}
+
+bool UMassWarWeaponSubsystem::SetAmmo(FMassEntityManager& EntityManager, FMassEntityHandle Entity, EMassWarWeaponSlot Slot, const UMassWarAmmoDefinition* Ammo) const
+{
+	FMassWarLoadoutFragment* Fragment = EntityManager.IsEntityValid(Entity) ? EntityManager.GetFragmentDataPtr<FMassWarLoadoutFragment>(Entity) : nullptr;
+	const int32 SlotIndex = static_cast<int32>(Slot);
+	if (!Fragment || SlotIndex >= MassWarWeaponSlotCount)
+	{
+		return false;
+	}
+	const UMassWarWeaponDefinition* Weapon = GetDefinition(Fragment->WeaponIds[SlotIndex]);
+	if (!Weapon || (Ammo && Weapon->AllowedAmmo.Num() > 0 && !Weapon->AllowedAmmo.Contains(Ammo)))
+	{
+		return false;
+	}
+	Fragment->AmmoIds[SlotIndex] = FindAmmoId(Ammo);
+	RefreshStats(EntityManager, Entity);
+	return true;
+}
+
+void UMassWarWeaponSubsystem::RefreshStats(FMassEntityManager& EntityManager, FMassEntityHandle Entity) const
+{
+	if (UMassWarStatSubsystem* Stats = GetWorld() ? GetWorld()->GetSubsystem<UMassWarStatSubsystem>() : nullptr)
+	{
+		Stats->RefreshProfile(FMassEntityView(EntityManager, Entity));
+	}
 }

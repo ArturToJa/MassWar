@@ -4,6 +4,7 @@
 #include "Stats/MassWarStatSettings.h"
 #include "Stats/MassWarStatSet.h"
 #include "MassEntityManager.h"
+#include "MassEntityView.h"
 #include "MassEntityTemplateRegistry.h"
 #include "NativeGameplayTags.h"
 #include "HAL/IConsoleManager.h"
@@ -52,8 +53,36 @@ namespace MassWarStatTags
 		static_assert(UE_ARRAY_COUNT(BuiltIns) == static_cast<int32>(EMassWarStat::Count), "one entry per EMassWarStat");
 		return BuiltIns[static_cast<int32>(Stat)];
 	}
-
 }
+
+//~ Reader, calculator, library
+
+float FMassWarStatReader::Get(FMassWarStatId Stat) const
+{
+	return (IsValid() && Stat.IsValid() && Stat.Index < Subsystem->GetNumStats()) ? Values[Stat.Index] : 0.f;
+}
+
+float FMassWarStatReader::Get(const FGameplayTag& StatTag) const
+{
+	return IsValid() ? Get(Subsystem->FindStat(StatTag)) : 0.f;
+}
+
+float UMassWarStatCalculator::Calculate_Implementation(const FMassWarStatReader& Stats) const
+{
+	return Stats.Get(OutputStat);
+}
+
+float UMassWarStatLibrary::GetStat(const FMassWarStatReader& Stats, FGameplayTag StatTag)
+{
+	return Stats.Get(StatTag);
+}
+
+float UMassWarStatLibrary::GetBuiltInStat(const FMassWarStatReader& Stats, EMassWarStat Stat)
+{
+	return Stats.Get(FMassWarStatId(Stat));
+}
+
+//~ Registry
 
 void UMassWarStatSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -70,7 +99,8 @@ void UMassWarStatSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 		Defaults.Add(BuiltIn.Default);
 	}
 
-	if (const UMassWarStatSettings* Settings = GetDefault<UMassWarStatSettings>())
+	const UMassWarStatSettings* Settings = GetDefault<UMassWarStatSettings>();
+	if (Settings)
 	{
 		for (const FMassWarStatDefinition& Definition : Settings->CustomStats)
 		{
@@ -101,9 +131,27 @@ void UMassWarStatSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	Stride = Tags.Num();
 	Flat.Reserve(MaxProfiles * Stride);
 
-	if (const UMassWarStatSettings* Settings = GetDefault<UMassWarStatSettings>())
+	Calculators.Reset();
+	CalculatorOutputs.Reset();
+	if (Settings)
 	{
 		LoadCatalog(Settings->StatSetCatalog);
+		for (const TSubclassOf<UMassWarStatCalculator>& CalculatorClass : Settings->StatCalculators)
+		{
+			if (!CalculatorClass)
+			{
+				continue;
+			}
+			UMassWarStatCalculator* Calculator = NewObject<UMassWarStatCalculator>(this, CalculatorClass);
+			const FMassWarStatId Output = FindStat(Calculator->OutputStat);
+			if (!Output.IsValid())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("MassWarStats: calculator %s ignored - its Output Stat '%s' is not a built-in or project stat."), *GetNameSafe(CalculatorClass), *Calculator->OutputStat.ToString());
+				continue;
+			}
+			Calculators.Add(Calculator);
+			CalculatorOutputs.Add(Output);
+		}
 	}
 }
 
@@ -112,6 +160,8 @@ FMassWarStatId UMassWarStatSubsystem::FindStat(const FGameplayTag& Tag) const
 	const uint8* Found = Tag.IsValid() ? TagToStat.Find(Tag) : nullptr;
 	return Found ? FMassWarStatId(*Found) : FMassWarStatId();
 }
+
+//~ Build time
 
 uint16 UMassWarStatSubsystem::GetOrCreateProfile(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World)
 {
@@ -164,135 +214,210 @@ void UMassWarStatSubsystem::ContributeStatSet(FMassEntityTemplateBuildContext& B
 	}
 }
 
+//~ Profiles
+
 uint16 UMassWarStatSubsystem::CreateDraft()
 {
-	FScopeLock Lock(&ResolveLock);
+	check(IsInGameThread());
 	if (Drafts.Num() >= MaxProfiles)
 	{
-		UE_LOG(LogTemp, Error, TEXT("MassWarStats: out of stat profiles (%d) - too many unit types and stat set combinations."), MaxProfiles);
+		UE_LOG(LogTemp, Error, TEXT("MassWarStats: out of stat profiles (%d) - too many unit types and stat setups."), MaxProfiles);
 		return FMassWarStatProfileFragment::InvalidProfile;
 	}
 	FProfileDraft& Draft = Drafts.AddDefaulted_GetRef();
 	Draft.Base.Init(0.f, Stride);
 	Draft.BaseIsSet.Init(false, Stride);
-	bAnyDirty = true;
-	return static_cast<uint16>(Drafts.Num() - 1);
+	const uint16 Profile = static_cast<uint16>(Drafts.Num() - 1);
+	Resolve(Profile);
+	return Profile;
 }
 
 void UMassWarStatSubsystem::SetBase(uint16 Profile, FMassWarStatId Stat, float Value)
 {
-	FScopeLock Lock(&ResolveLock);
+	check(IsInGameThread());
 	if (Drafts.IsValidIndex(Profile) && Stat.IsValid() && Stat.Index < Stride)
 	{
 		Drafts[Profile].Base[Stat.Index] = Value;
 		Drafts[Profile].BaseIsSet[Stat.Index] = true;
-		Drafts[Profile].bDirty = true;
-		bAnyDirty = true;
+		Resolve(Profile);
 	}
 }
 
 void UMassWarStatSubsystem::AddModifier(uint16 Profile, const FMassWarStatModifier& Modifier)
 {
+	check(IsInGameThread());
 	const FMassWarStatId Stat = FindStat(Modifier.Stat);
 	if (!Stat.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("MassWarStats: modifier for unknown stat '%s' ignored - is it a built-in (MassWar.Stat.*) or defined in Project Settings > MassWar Stats?"), *Modifier.Stat.ToString());
 		return;
 	}
-
-	FScopeLock Lock(&ResolveLock);
 	if (Drafts.IsValidIndex(Profile))
 	{
 		FStatModifier& Entry = Drafts[Profile].Modifiers.AddDefaulted_GetRef();
 		Entry.Stat = Stat;
 		Entry.Op = Modifier.Op;
 		Entry.Value = Modifier.Value;
-		Drafts[Profile].bDirty = true;
-		bAnyDirty = true;
+		Resolve(Profile);
 	}
 }
 
-void UMassWarStatSubsystem::ResolveDirty() const
+void UMassWarStatSubsystem::AppendStatSet(FProfileDraft& Draft, const UMassWarStatSet& StatSet) const
 {
-	if (!bAnyDirty)
+	for (const FMassWarStatModifier& Modifier : StatSet.Modifiers)
 	{
-		return;
-	}
-
-	FScopeLock Lock(&ResolveLock);
-	if (!bAnyDirty)
-	{
-		return;
-	}
-
-	if (Flat.Num() < Drafts.Num() * Stride)
-	{
-		if (Flat.Max() < Drafts.Num() * Stride)
+		const FMassWarStatId Stat = FindStat(Modifier.Stat);
+		if (Stat.IsValid())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("MassWarStats: more than %d stat profiles - readers holding an older view must refresh it."), MaxProfiles);
+			FStatModifier& Entry = Draft.Modifiers.AddDefaulted_GetRef();
+			Entry.Stat = Stat;
+			Entry.Op = Modifier.Op;
+			Entry.Value = Modifier.Value;
 		}
-		Flat.SetNumZeroed(Drafts.Num() * Stride);
-	}
-
-	for (int32 Profile = 0; Profile < Drafts.Num(); ++Profile)
-	{
-		FProfileDraft& Draft = Drafts[Profile];
-		if (!Draft.bDirty)
+		else
 		{
-			continue;
+			UE_LOG(LogTemp, Warning, TEXT("MassWarStats: stat set %s has a modifier for unknown stat '%s' - ignored."), *StatSet.GetName(), *Modifier.Stat.ToString());
 		}
-		Draft.bDirty = false;
+	}
+}
 
-		for (int32 Stat = 0; Stat < Stride; ++Stat)
+void UMassWarStatSubsystem::Resolve(uint16 Profile)
+{
+	check(IsInGameThread());
+	const FProfileDraft& Draft = Drafts[Profile];
+
+	TArray<float, TInlineAllocator<32>> Row;
+	Row.SetNumUninitialized(Stride);
+	for (int32 Stat = 0; Stat < Stride; ++Stat)
+	{
+		float Value = Draft.BaseIsSet[Stat] ? Draft.Base[Stat] : Defaults[Stat];
+		float Added = 0.f;
+		float Multiplied = 1.f;
+		for (const FStatModifier& Modifier : Draft.Modifiers)
 		{
-			float Value = Draft.BaseIsSet[Stat] ? Draft.Base[Stat] : Defaults[Stat];
-			float Added = 0.f;
-			float Multiplied = 1.f;
-			for (const FStatModifier& Modifier : Draft.Modifiers)
+			if (Modifier.Stat.Index != Stat)
 			{
-				if (Modifier.Stat.Index != Stat)
-				{
-					continue;
-				}
-				switch (Modifier.Op)
-				{
-				case EMassWarStatOp::Set: Value = Modifier.Value; break;
-				case EMassWarStatOp::Add: Added += Modifier.Value; break;
-				case EMassWarStatOp::Multiply: Multiplied *= Modifier.Value; break;
-				}
+				continue;
 			}
-			Flat[Profile * Stride + Stat] = (Value + Added) * Multiplied;
+			switch (Modifier.Op)
+			{
+			case EMassWarStatOp::Set: Value = Modifier.Value; break;
+			case EMassWarStatOp::Add: Added += Modifier.Value; break;
+			case EMassWarStatOp::Multiply: Multiplied *= Modifier.Value; break;
+			}
+		}
+		Row[Stat] = (Value + Added) * Multiplied;
+	}
+
+	// The project's calculators see the values as they are at that point and each writes one stat.
+	FMassWarStatReader Reader;
+	Reader.Subsystem = this;
+	Reader.Values = Row.GetData();
+	for (int32 Index = 0; Index < Calculators.Num(); ++Index)
+	{
+		Row[CalculatorOutputs[Index].Index] = Calculators[Index]->Calculate(Reader);
+	}
+
+	// Space for MaxProfiles was reserved, so this never moves the storage processors are reading.
+	if (Flat.Num() < (Profile + 1) * Stride)
+	{
+		Flat.SetNumZeroed((Profile + 1) * Stride);
+	}
+	FMemory::Memcpy(&Flat[Profile * Stride], Row.GetData(), Stride * sizeof(float));
+}
+
+uint16 UMassWarStatSubsystem::DeriveProfile(uint16 Profile, TConstArrayView<const UMassWarStatSet*> Sets)
+{
+	check(IsInGameThread());
+	if (!Drafts.IsValidIndex(Profile))
+	{
+		return Profile;
+	}
+
+	// Always derive from the unit type's own profile, so the same setup gives the same profile whatever the unit had before.
+	const uint16 Root = Drafts[Profile].Parent != FMassWarStatProfileFragment::InvalidProfile ? Drafts[Profile].Parent : Profile;
+	if (Sets.IsEmpty())
+	{
+		return Root;
+	}
+
+	FDerivedKey Key;
+	Key.Root = Root;
+	Key.Sets = Sets;
+	if (const uint16* Existing = DerivedProfiles.Find(Key))
+	{
+		return *Existing;
+	}
+
+	if (Drafts.Num() >= MaxProfiles)
+	{
+		UE_LOG(LogTemp, Error, TEXT("MassWarStats: out of stat profiles (%d) - a stat setup is ignored."), MaxProfiles);
+		return Root;
+	}
+
+	FProfileDraft Derived = Drafts[Root]; // by value: adding to Drafts may move its storage
+	Derived.Parent = Root;
+	for (const UMassWarStatSet* StatSet : Sets)
+	{
+		AppendStatSet(Derived, *StatSet);
+	}
+	Drafts.Add(MoveTemp(Derived));
+	const uint16 NewProfile = static_cast<uint16>(Drafts.Num() - 1);
+	Resolve(NewProfile);
+	DerivedProfiles.Add(MoveTemp(Key), NewProfile);
+	return NewProfile;
+}
+
+//~ Sources
+
+void UMassWarStatSubsystem::RegisterSourceCollector(FName Owner, FSourceCollector Collector)
+{
+	for (FCollectorEntry& Entry : Collectors)
+	{
+		if (Entry.Owner == Owner)
+		{
+			Entry.Collect = MoveTemp(Collector);
+			return;
 		}
 	}
-	bAnyDirty = false;
+	Collectors.Add({ Owner, MoveTemp(Collector) });
 }
 
-UMassWarStatSubsystem::FView UMassWarStatSubsystem::GetView() const
+void UMassWarStatSubsystem::UnregisterSourceCollector(FName Owner)
 {
-	ResolveDirty();
-	FView View;
-	View.Data = Flat.GetData();
-	View.Stride = Stride;
-	return View;
+	Collectors.RemoveAll([Owner](const FCollectorEntry& Entry) { return Entry.Owner == Owner; });
 }
 
-float UMassWarStatSubsystem::GetValue(const FMassEntityManager& EntityManager, FMassEntityHandle Entity, FMassWarStatId Stat) const
+void UMassWarStatSubsystem::RefreshProfile(const FMassEntityView& Unit)
 {
-	if (!Stat.IsValid() || Stat.Index >= Stride)
-	{
-		return 0.f;
-	}
-	const FMassWarStatProfileFragment* Profile = EntityManager.IsEntityValid(Entity) ? EntityManager.GetFragmentDataPtr<FMassWarStatProfileFragment>(Entity) : nullptr;
+	FMassWarStatProfileFragment* Profile = Unit.GetFragmentDataPtr<FMassWarStatProfileFragment>();
 	if (!Profile || Profile->ProfileIndex == FMassWarStatProfileFragment::InvalidProfile)
 	{
-		return GetDefaultValue(Stat);
+		return;
 	}
-	return GetView().Get(Profile->ProfileIndex, Stat);
-}
 
-float UMassWarStatSubsystem::GetValue(const FMassEntityManager& EntityManager, FMassEntityHandle Entity, const FGameplayTag& StatTag) const
-{
-	return GetValue(EntityManager, Entity, FindStat(StatTag));
+	TArray<const UMassWarStatSet*> Sets;
+	for (const FCollectorEntry& Entry : Collectors)
+	{
+		Entry.Collect(Unit, Sets);
+	}
+	if (const FMassWarStatSetsFragment* Runtime = Unit.GetFragmentDataPtr<FMassWarStatSetsFragment>())
+	{
+		for (const uint8 Id : Runtime->Ids)
+		{
+			if (const UMassWarStatSet* StatSet = GetStatSet(Id))
+			{
+				Sets.Add(StatSet);
+			}
+			else if (Id != 0)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("MassWarStats: stat set id %d is not in the catalog on this machine - ignored. Server and clients must share the same Stat Set Catalog."), Id);
+			}
+		}
+	}
+	Sets.RemoveAll([](const UMassWarStatSet* StatSet) { return StatSet == nullptr; });
+
+	Profile->ProfileIndex = DeriveProfile(Profile->ProfileIndex, Sets);
 }
 
 void UMassWarStatSubsystem::LoadCatalog(const TArray<TSoftObjectPtr<UMassWarStatSet>>& Soft)
@@ -336,81 +461,14 @@ uint8 UMassWarStatSubsystem::FindStatSetId(const UMassWarStatSet* StatSet) const
 	return 0;
 }
 
-uint16 UMassWarStatSubsystem::DeriveProfile(uint16 Profile, TConstArrayView<uint8> Ids)
+void UMassWarStatSubsystem::ApplyStatSets(const FMassEntityView& Unit, TConstArrayView<uint8> Ids)
 {
-	if (Profile == FMassWarStatProfileFragment::InvalidProfile)
+	FMassWarStatSetsFragment* StatSets = Unit.GetFragmentDataPtr<FMassWarStatSetsFragment>();
+	if (!StatSets)
 	{
-		return Profile;
+		return;
 	}
 
-	FScopeLock Lock(&ResolveLock);
-	if (!Drafts.IsValidIndex(Profile))
-	{
-		return Profile;
-	}
-
-	// Always derive from the unit type's own profile, so the same recipe gives the same profile whatever the unit had before.
-	const uint16 Root = Drafts[Profile].Parent != FMassWarStatProfileFragment::InvalidProfile ? Drafts[Profile].Parent : Profile;
-
-	uint32 Packed = 0;
-	for (int32 Slot = 0; Slot < Ids.Num() && Slot < MassWarMaxRuntimeStatSets; ++Slot)
-	{
-		Packed |= static_cast<uint32>(Ids[Slot]) << (8 * Slot);
-	}
-	if (Packed == 0)
-	{
-		return Root;
-	}
-
-	const uint64 Key = static_cast<uint64>(Root) | (static_cast<uint64>(Packed) << 16);
-	if (const uint16* Existing = DerivedProfiles.Find(Key))
-	{
-		return *Existing;
-	}
-
-	if (Drafts.Num() >= MaxProfiles)
-	{
-		UE_LOG(LogTemp, Error, TEXT("MassWarStats: out of stat profiles (%d) - a stat set combination is ignored."), MaxProfiles);
-		return Root;
-	}
-
-	// Copy by value first: AddDefaulted may move the array's storage.
-	FProfileDraft Derived = Drafts[Root];
-	Derived.Parent = Root;
-	Derived.bDirty = true;
-	for (int32 Slot = 0; Slot < Ids.Num() && Slot < MassWarMaxRuntimeStatSets; ++Slot)
-	{
-		const UMassWarStatSet* StatSet = GetStatSet(Ids[Slot]);
-		if (!StatSet)
-		{
-			if (Ids[Slot] != 0)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("MassWarStats: stat set id %d is not in the catalog on this machine - ignored. Server and clients must share the same Stat Set Catalog."), Ids[Slot]);
-			}
-			continue;
-		}
-		for (const FMassWarStatModifier& Modifier : StatSet->Modifiers)
-		{
-			const FMassWarStatId Stat = FindStat(Modifier.Stat);
-			if (Stat.IsValid())
-			{
-				FStatModifier& Entry = Derived.Modifiers.AddDefaulted_GetRef();
-				Entry.Stat = Stat;
-				Entry.Op = Modifier.Op;
-				Entry.Value = Modifier.Value;
-			}
-		}
-	}
-
-	Drafts.Add(MoveTemp(Derived));
-	const uint16 NewProfile = static_cast<uint16>(Drafts.Num() - 1);
-	DerivedProfiles.Add(Key, NewProfile);
-	bAnyDirty = true;
-	return NewProfile;
-}
-
-void UMassWarStatSubsystem::ApplyStatSets(FMassWarStatProfileFragment& Profile, FMassWarStatSetsFragment& StatSets, TConstArrayView<uint8> Ids)
-{
 	// Keep only known, distinct ids, in order.
 	uint8 Clean[MassWarMaxRuntimeStatSets] = { 0, 0, 0, 0 };
 	int32 Count = 0;
@@ -431,27 +489,21 @@ void UMassWarStatSubsystem::ApplyStatSets(FMassWarStatProfileFragment& Profile, 
 		}
 	}
 
-	if (FMemory::Memcmp(Clean, StatSets.Ids, sizeof(Clean)) == 0)
+	if (FMemory::Memcmp(Clean, StatSets->Ids, sizeof(Clean)) == 0)
 	{
 		return;
 	}
-	FMemory::Memcpy(StatSets.Ids, Clean, sizeof(Clean));
-	Profile.ProfileIndex = DeriveProfile(Profile.ProfileIndex, TConstArrayView<uint8>(Clean, MassWarMaxRuntimeStatSets));
+	FMemory::Memcpy(StatSets->Ids, Clean, sizeof(Clean));
+	RefreshProfile(Unit);
 }
 
 bool UMassWarStatSubsystem::SetEntityStatSets(FMassEntityManager& EntityManager, FMassEntityHandle Entity, TConstArrayView<uint8> Ids)
 {
-	if (!EntityManager.IsEntityValid(Entity))
+	if (!EntityManager.IsEntityValid(Entity) || !EntityManager.GetFragmentDataPtr<FMassWarStatSetsFragment>(Entity) || !EntityManager.GetFragmentDataPtr<FMassWarStatProfileFragment>(Entity))
 	{
 		return false;
 	}
-	FMassWarStatProfileFragment* Profile = EntityManager.GetFragmentDataPtr<FMassWarStatProfileFragment>(Entity);
-	FMassWarStatSetsFragment* StatSets = EntityManager.GetFragmentDataPtr<FMassWarStatSetsFragment>(Entity);
-	if (!Profile || !StatSets)
-	{
-		return false;
-	}
-	ApplyStatSets(*Profile, *StatSets, Ids);
+	ApplyStatSets(FMassEntityView(EntityManager, Entity), Ids);
 	return true;
 }
 
@@ -509,10 +561,51 @@ bool UMassWarStatSubsystem::RemoveEntityStatSet(FMassEntityManager& EntityManage
 	}
 	return SetEntityStatSets(EntityManager, Entity, TConstArrayView<uint8>(Ids, MassWarMaxRuntimeStatSets));
 }
+
+//~ Reading
+
+UMassWarStatSubsystem::FView UMassWarStatSubsystem::GetView() const
+{
+	FView View;
+	View.Data = Flat.GetData();
+	View.Stride = Stride;
+	return View;
+}
+
+FMassWarStatReader UMassWarStatSubsystem::MakeReader(uint16 Profile) const
+{
+	FMassWarStatReader Reader;
+	if (Drafts.IsValidIndex(Profile) && Flat.Num() >= (Profile + 1) * Stride)
+	{
+		Reader.Subsystem = this;
+		Reader.Values = &Flat[Profile * Stride];
+	}
+	return Reader;
+}
+
+float UMassWarStatSubsystem::GetValue(const FMassEntityManager& EntityManager, FMassEntityHandle Entity, FMassWarStatId Stat) const
+{
+	if (!Stat.IsValid() || Stat.Index >= Stride)
+	{
+		return 0.f;
+	}
+	const FMassWarStatProfileFragment* Profile = EntityManager.IsEntityValid(Entity) ? EntityManager.GetFragmentDataPtr<FMassWarStatProfileFragment>(Entity) : nullptr;
+	if (!Profile || Profile->ProfileIndex == FMassWarStatProfileFragment::InvalidProfile)
+	{
+		return GetDefaultValue(Stat);
+	}
+	return GetView().Get(Profile->ProfileIndex, Stat);
+}
+
+float UMassWarStatSubsystem::GetValue(const FMassEntityManager& EntityManager, FMassEntityHandle Entity, const FGameplayTag& StatTag) const
+{
+	return GetValue(EntityManager, Entity, FindStat(StatTag));
+}
+
 void UMassWarStatSubsystem::DumpToLog() const
 {
 	const FView View = GetView();
-	UE_LOG(LogTemp, Display, TEXT("MassWarStats: %d stats, %d profiles"), Stride, Drafts.Num());
+	UE_LOG(LogTemp, Display, TEXT("MassWarStats: %d stats, %d profiles, %d calculators"), Stride, Drafts.Num(), Calculators.Num());
 	for (int32 Profile = 0; Profile < Drafts.Num(); ++Profile)
 	{
 		FString Line = FString::Printf(TEXT("  profile %d%s:"), Profile, Drafts[Profile].Parent != FMassWarStatProfileFragment::InvalidProfile ? *FString::Printf(TEXT(" (derived from %d)"), Drafts[Profile].Parent) : TEXT(""));

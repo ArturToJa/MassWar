@@ -88,6 +88,7 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		InReplicatedAgent.AttackCounter = AttackFeedbackList[EntityIdx].AttackCounter;
 		InReplicatedAgent.FormationId = FormationList[EntityIdx].FormationId;
 		InReplicatedAgent.LoadoutPacked = LoadoutList.IsEmpty() ? 0u : LoadoutList[EntityIdx].Pack();
+		InReplicatedAgent.AmmoPacked = LoadoutList.IsEmpty() ? 0u : LoadoutList[EntityIdx].PackAmmo();
 		InReplicatedAgent.StatSetsPacked = StatSetsList.IsEmpty() ? 0u : StatSetsList[EntityIdx].Pack();
 
 		// The engine already assigned InReplicatedAgent's NetID (via FMassNetworkIDFragment) before this
@@ -107,7 +108,7 @@ void UMassWarReplicator::ProcessClientReplication(FMassExecutionContext& Context
 		// Team/owner don't change after AddEntityCallback set them once. Position/yaw update continuously;
 		// life state (Alive -> Dying) and the attack counter change occasionally and are only re-sent when they do.
 		PositionYawHandler.ModifyEntity<FMassWarFastArrayItem>(Handle, EntityIdx, Bubble.GetTransformHandlerMutable());
-		Bubble.SetAgentDynamicState(Handle, static_cast<uint8>(LifeList[EntityIdx].State), AttackFeedbackList[EntityIdx].AttackCounter, FormationList[EntityIdx].FormationId, LoadoutList.IsEmpty() ? 0u : LoadoutList[EntityIdx].Pack(), StatSetsList.IsEmpty() ? 0u : StatSetsList[EntityIdx].Pack());
+		Bubble.SetAgentDynamicState(Handle, static_cast<uint8>(LifeList[EntityIdx].State), AttackFeedbackList[EntityIdx].AttackCounter, FormationList[EntityIdx].FormationId, LoadoutList.IsEmpty() ? 0u : LoadoutList[EntityIdx].Pack(), LoadoutList.IsEmpty() ? 0u : LoadoutList[EntityIdx].PackAmmo(), StatSetsList.IsEmpty() ? 0u : StatSetsList[EntityIdx].Pack());
 	};
 
 	auto RemoveEntityCallback = [&](FMassExecutionContext& Context, const FMassReplicatedAgentHandle Handle, const FMassClientHandle ClientHandle)

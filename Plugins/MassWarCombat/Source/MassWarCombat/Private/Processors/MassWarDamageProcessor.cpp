@@ -6,6 +6,7 @@
 #include "Fragments/MassWarUnitFragments.h"
 #include "Fragments/MassWarCombatFragments.h"
 #include "Stats/MassWarStatSubsystem.h"
+#include "Rules/MassWarDamageRule.h"
 #include "UnitBrain/MassWarUnitStateView.h"
 #include "Fragments/MassWarPerceptionFragments.h"
 #include "Perception/MassWarPerceptionSubsystem.h"
@@ -16,6 +17,8 @@ UMassWarDamageProcessor::UMassWarDamageProcessor()
 {
 	bAutoRegisterWithProcessingPhases = true;
 	ExecutionFlags = (int32)(EProcessorExecutionFlags::Server | EProcessorExecutionFlags::Standalone);
+	// The damage rule may be a Blueprint, which only runs on the game thread (and a landed attack writes perception state).
+	bRequiresGameThreadExecution = true;
 }
 
 void UMassWarDamageProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
@@ -43,8 +46,10 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 		return;
 	}
 	const UMassWarStatSubsystem::FView Stats = StatSubsystem->GetView();
+	const UMassWarCombatSubsystem* CombatSubsystem = World->GetSubsystem<UMassWarCombatSubsystem>();
+	const UMassWarDamageRule* DamageRule = CombatSubsystem ? CombatSubsystem->GetDamageRule() : nullptr;
 
-	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime, PerceptionSubsystem, Stats](FMassExecutionContext& Context)
+	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime, PerceptionSubsystem, Stats, StatSubsystem, DamageRule](FMassExecutionContext& Context)
 	{
 		const TArrayView<FMassWarOrderFragment> Orders = Context.GetMutableFragmentView<FMassWarOrderFragment>();
 		const TArrayView<FMassWarAttackCooldownFragment> CooldownList = Context.GetMutableFragmentView<FMassWarAttackCooldownFragment>();
@@ -107,7 +112,13 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 			}
 
 			Cooldown.TimeSinceLastAttack = 0.f;
-			const float AttackDamage = Stats.Get(Profile, EMassWarStat::AttackDamage);
+			float AttackDamage = Stats.Get(Profile, EMassWarStat::AttackDamage);
+			if (DamageRule)
+			{
+				const FMassWarStatProfileFragment* TargetProfile = EntityManager.GetFragmentDataPtr<FMassWarStatProfileFragment>(Order.TargetEntity);
+				AttackDamage = DamageRule->ComputeDamage(StatSubsystem->MakeReader(Profile),
+					TargetProfile ? StatSubsystem->MakeReader(TargetProfile->ProfileIndex) : FMassWarStatReader(), AttackDamage, Distance);
+			}
 			++AttackFeedbackList[It].AttackCounter; // wraps; lets every machine's puppet play an attack animation
 			TargetHealth->Health -= AttackDamage;
 

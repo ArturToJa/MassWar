@@ -7,6 +7,7 @@
 #include "MassWarWeaponCatalog.generated.h"
 
 class UMassWarWeaponDefinition;
+class UMassWarAmmoDefinition;
 
 /**
  * The list of every weapon in the game. A weapon's position in this list (plus one) is the id that is stored per
@@ -23,7 +24,20 @@ public:
 	TArray<TObjectPtr<UMassWarWeaponDefinition>> Weapons;
 };
 
-/** Project Settings > Plugins > MassWar Weapons: which catalog the game uses. */
+/**
+ * The list of every kind of ammo in the game. Same rules as the weapon catalog: a position (plus one) is the id stored per
+ * unit and replicated, so append at the end and never reorder or delete entries in a shipped game. At most 255.
+ */
+UCLASS(BlueprintType)
+class MASSWARWEAPONS_API UMassWarAmmoCatalog : public UPrimaryDataAsset
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Ammo")
+	TArray<TObjectPtr<UMassWarAmmoDefinition>> Ammo;
+};
+/** Project Settings > Plugins > MassWar Weapons: which catalogs the game uses. */
 UCLASS(Config = Game, DefaultConfig, meta = (DisplayName = "MassWar Weapons"))
 class MASSWARWEAPONS_API UMassWarWeaponSettings : public UDeveloperSettings
 {
@@ -34,4 +48,7 @@ public:
 
 	UPROPERTY(EditAnywhere, Config, Category = "Weapons")
 	TSoftObjectPtr<UMassWarWeaponCatalog> Catalog;
+
+	UPROPERTY(EditAnywhere, Config, Category = "Weapons")
+	TSoftObjectPtr<UMassWarAmmoCatalog> AmmoCatalog;
 };
