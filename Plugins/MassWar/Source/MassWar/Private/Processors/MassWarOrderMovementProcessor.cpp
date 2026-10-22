@@ -6,6 +6,8 @@
 #include "MassExecutionContext.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "UnitBrain/MassWarUnitStateView.h"
+#include "Stats/MassWarStatSubsystem.h"
+#include "Engine/World.h"
 
 namespace
 {
@@ -25,7 +27,7 @@ void UMassWarOrderMovementProcessor::ConfigureQueries(const TSharedRef<FMassEnti
 	EntityQuery.AddRequirement<FMassWarOrderFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
-	EntityQuery.AddRequirement<FMassWarMovementParamsFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassWarStatProfileFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarNavPathFragment>(EMassFragmentAccess::ReadWrite, EMassFragmentPresence::Optional);
 }
@@ -33,13 +35,19 @@ void UMassWarOrderMovementProcessor::ConfigureQueries(const TSharedRef<FMassEnti
 void UMassWarOrderMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	const float DeltaTime = Context.GetDeltaTimeSeconds();
+	const UMassWarStatSubsystem* StatSubsystem = EntityManager.GetWorld() ? EntityManager.GetWorld()->GetSubsystem<UMassWarStatSubsystem>() : nullptr;
+	if (!StatSubsystem)
+	{
+		return;
+	}
+	const UMassWarStatSubsystem::FView Stats = StatSubsystem->GetView();
 
-	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime](FMassExecutionContext& Context)
+	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime, Stats](FMassExecutionContext& Context)
 	{
 		const TArrayView<FMassWarOrderFragment> Orders = Context.GetMutableFragmentView<FMassWarOrderFragment>();
 		const TArrayView<FTransformFragment> Transforms = Context.GetMutableFragmentView<FTransformFragment>();
 		const TArrayView<FMassVelocityFragment> Velocities = Context.GetMutableFragmentView<FMassVelocityFragment>();
-		const TConstArrayView<FMassWarMovementParamsFragment> MovementParamsList = Context.GetFragmentView<FMassWarMovementParamsFragment>();
+		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		// Only present for units that route around obstacles (bUseNavMesh); empty for the rest.
 		const TArrayView<FMassWarNavPathFragment> NavList = Context.GetMutableFragmentView<FMassWarNavPathFragment>();
@@ -87,7 +95,7 @@ void UMassWarOrderMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 			ToDestination.Z = 0.f;
 
 			const float Distance = ToDestination.Size();
-			const FMassWarMovementParamsFragment& MovementParams = MovementParamsList[It];
+			const uint16 Profile = ProfileList[It].ProfileIndex;
 
 			// Face where we're heading (Move) or the target we're fighting (Attack - including once in range
 			// and standing still). Written onto the entity transform so every representation of the unit
@@ -97,7 +105,7 @@ void UMassWarOrderMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 			// A Move order is done when the unit is really at its destination (AcceptanceRadius); an Attack
 			// order just closes in on its target until AttackStopDistance. Two different distances - using
 			// one for both made a big attack stand-off distance cut every Move order short.
-			const float StopDistance = (bAttacking || Order.bStopAtAttackDistance) ? MovementParams.AttackStopDistance : MovementParams.AcceptanceRadius;
+			const float StopDistance = (bAttacking || Order.bStopAtAttackDistance) ? Stats.Get(Profile, EMassWarStat::AttackStopDistance) : Stats.Get(Profile, EMassWarStat::AcceptanceRadius);
 
 			// Where to steer this frame: straight at the destination - or, for a unit that routes around obstacles
 			// (has a navmesh path) and whose path is for THIS order, at the next corner of that path. Arriving and
@@ -135,7 +143,7 @@ void UMassWarOrderMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 			{
 				FTransform& Transform = Transforms[It].GetMutableTransform();
 				const float TargetYaw = FMath::RadiansToDegrees(FMath::Atan2(FaceDirection.Y, FaceDirection.X));
-				const float NewYaw = FMath::FixedTurn(Transform.GetRotation().Rotator().Yaw, TargetYaw, MovementParams.TurnRate * DeltaTime);
+				const float NewYaw = FMath::FixedTurn(Transform.GetRotation().Rotator().Yaw, TargetYaw, Stats.Get(Profile, EMassWarStat::TurnRate) * DeltaTime);
 				Transform.SetRotation(FQuat(FVector::UpVector, FMath::DegreesToRadians(NewYaw)));
 			}
 
@@ -151,7 +159,7 @@ void UMassWarOrderMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 			}
 			else
 			{
-				Velocities[It].Value = SteerDistance > UE_SMALL_NUMBER ? (ToSteer / SteerDistance) * MovementParams.MoveSpeed : FVector::ZeroVector;
+				Velocities[It].Value = SteerDistance > UE_SMALL_NUMBER ? (ToSteer / SteerDistance) * Stats.Get(Profile, EMassWarStat::MoveSpeed) : FVector::ZeroVector;
 			}
 		}
 	});

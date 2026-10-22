@@ -22,6 +22,8 @@ public class MassWar : ModuleRules
 				"MassRepresentation",
 				"MassSimulation",
 				"MassActors",
+				"GameplayTags",
+				"DeveloperSettings",
 			}
 			);
 

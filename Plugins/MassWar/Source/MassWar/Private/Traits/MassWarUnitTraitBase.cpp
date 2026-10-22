@@ -6,6 +6,7 @@
 #include "MassActorSubsystem.h"
 #include "MassMovementFragments.h"
 #include "Fragments/MassWarUnitFragments.h"
+#include "Stats/MassWarStatSubsystem.h"
 
 void UMassWarUnitTraitBase::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
 {
@@ -36,17 +37,20 @@ void UMassWarUnitTraitBase::BuildTemplate(FMassEntityTemplateBuildContext& Build
 	}
 	if (bAvoidOtherUnits)
 	{
-		FMassWarAvoidanceFragment& Avoidance = BuildContext.AddFragment_GetRef<FMassWarAvoidanceFragment>();
-		Avoidance.Radius = AvoidanceRadius;
-		Avoidance.Strength = AvoidanceStrength;
+		BuildContext.AddFragment<FMassWarAvoidanceFragment>();
 	}
 	BuildContext.AddFragment<FMassWarFormationMemberFragment>();
+	BuildContext.AddFragment<FMassWarStatSetsFragment>(); // run-time stat sets (upgrades, buffs); replicated
 	BuildContext.AddFragment<FMassWarNetIdFragment>();
 	BuildContext.AddFragment<FMassWarOwnerFragment>();
 
-	FMassWarMovementParamsFragment& MovementParams = BuildContext.AddFragment_GetRef<FMassWarMovementParamsFragment>();
-	MovementParams.MoveSpeed = MoveSpeed;
-	MovementParams.AcceptanceRadius = AcceptanceRadius;
-	MovementParams.AttackStopDistance = AttackStopDistance;
-	MovementParams.TurnRate = TurnRate;
+	// The numbers other systems read are stats: this trait supplies the unit type's base values (a MassWar Stats trait,
+	// weapons and upgrades can change them; the order of traits does not matter).
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::MoveSpeed, MoveSpeed);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::TurnRate, TurnRate);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AcceptanceRadius, AcceptanceRadius);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AttackStopDistance, AttackStopDistance);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AvoidanceRadius, AvoidanceRadius);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AvoidanceStrength, AvoidanceStrength);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::DeathLingerTime, DeathLingerTime);
 }

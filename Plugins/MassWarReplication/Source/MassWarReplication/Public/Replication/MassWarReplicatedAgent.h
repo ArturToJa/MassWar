@@ -54,6 +54,11 @@ struct MASSWARREPLICATION_API FReplicatedWarAgent : public FReplicatedAgentBase
 	UPROPERTY(Transient)
 	uint32 LoadoutPacked = 0;
 
+	/** Core's FMassWarStatSetsFragment, packed (catalog ids of the stat sets applied at run time); 0 for none. Clients derive the unit's
+	 *  stat profile from these ids, so its numbers agree everywhere; re-sent when a set is added or removed. */
+	UPROPERTY(Transient)
+	uint32 StatSetsPacked = 0;
+
 private:
 	UPROPERTY(Transient)
 	FReplicatedAgentPositionYawData PositionYaw;

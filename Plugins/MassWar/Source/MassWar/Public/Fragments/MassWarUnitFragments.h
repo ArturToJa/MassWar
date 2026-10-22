@@ -79,7 +79,7 @@ struct MASSWAR_API FMassWarOrderFragment : public FMassFragment
 	FMassEntityHandle TargetEntity;
 
 	/** Move orders only. False (a player's click order): the order completes when the unit is really at
-	 *  Destination (FMassWarMovementParamsFragment::AcceptanceRadius). True (an AI approach-to-engage move,
+	 *  Destination (the AcceptanceRadius stat). True (an AI approach-to-engage move,
 	 *  e.g. the StateTree's Move To Range): it completes once within AttackStopDistance of Destination -
 	 *  the unit only needs to get into fighting range, not onto the enemy. */
 	UPROPERTY(Transient)
@@ -212,49 +212,16 @@ struct TMassFragmentTraits<FMassWarNavPathFragment> final
 	};
 };
 
-/** Movement tuning consumed by MassWarOrderMovementProcessor to turn a Move order into velocity. */
-USTRUCT()
-struct MASSWAR_API FMassWarMovementParamsFragment : public FMassFragment
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float MoveSpeed = 500.f;
-
-	/** Move orders only: how close to the destination counts as "arrived" (order reverts to Idle, velocity
-	 *  zeroed). Keep this small - a Move order is not complete until the unit is really there. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float AcceptanceRadius = 50.f;
-
-	/** Attack orders only: how close the unit closes in on its target before it stops and lets combat take
-	 *  over (the order itself stays Attack). Keep this within the unit's attack range (MassWarCombat's
-	 *  AttackRange) or it will halt out of reach and never shoot. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float AttackStopDistance = 100.f;
-
-	/** Degrees per second the unit turns (yaw) toward the direction it is moving / the target it is
-	 *  attacking. Facing lives on the entity's transform so every representation (near Actor, far ISM
-	 *  instance, replicated client copy) shows the same heading. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float TurnRate = 720.f;
-};
-
 /**
- * Opts a unit into unit-vs-unit separation (MassWarSeparationProcessor). Units without it neither push nor
+ * Opts a unit into unit-vs-unit separation (MassWarSeparationProcessor); its radius and strength come from its stats. Units without it neither push nor
  * are pushed - they pass through everyone.
  */
 USTRUCT()
 struct MASSWAR_API FMassWarAvoidanceFragment : public FMassFragment
 {
 	GENERATED_BODY()
-
-	/** Personal-space radius (uu). Two units are "touching" when their radii overlap. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Avoidance")
-	float Radius = 40.f;
-
-	/** How hard overlapping units push apart, as a fraction of MoveSpeed at full overlap. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Avoidance")
-	float Strength = 1.f;
+
+	// Radius and strength are stats (EMassWarStat::AvoidanceRadius / AvoidanceStrength).
 };
 
 /**

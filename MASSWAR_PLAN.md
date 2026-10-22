@@ -364,3 +364,29 @@ console command, project settings, quick-start docs).
 Demo game mode (2026-10-08): `AMassWarDemoGameMode::PlayerFormations` (`TArray<UMassWarFormationTemplate*>`, set in the Blueprint subclass defaults) - every joining player gets one formation per template, side by side
 (`SpawnFormationsForPlayer`, via `SpawnFormationWithUnits(Template->MakeParams(...))`). Empty list = the old fallback (`DemoUnitConfigPath` + `UnitsPerPlayer` / `UnitsPerFormation` / `FormationLoadouts`). Verified headless with two
 transient templates: formations of 20 and 25 units with their own weapons.
+
+**User-defined data - pass 1: the stat core (2026-10-17, branch feature/stats).** Direction agreed with the user: everything gameplay-relevant that is a number becomes a *stat*, resolved from sources
+(unit type, later weapon / ammo / upgrades / formation) and read by systems through one profile lookup; behaviour the user wants to change becomes replaceable *rule* classes (C++ and Blueprint, pass 2+);
+arbitrary data rides on definition assets as payload structs. Full survey/proposal table (areas: movement, combat, ammo, resources, targeting/relations, formations layouts+stats, perception/sight, orders,
+hold types/anim roles, spawning modifiers, replication, tuning constants) was given to the user in chat; order: (1) stat core [DONE], (2) ammo + weapon stats + combat reading them + rule hooks for range/damage,
+(3) resources + health replication, (4) formation rules/layouts + targeting/relations, (5) extensible orders, replicated custom data, settings cleanup.
+Built (Core plugin `MassWar`, folder `Stats/`): `EMassWarStat` (12 built-ins: MoveSpeed, TurnRate, AcceptanceRadius, AttackStopDistance, AvoidanceRadius, AvoidanceStrength, DeathLingerTime, MaxHealth,
+AttackDamage, AttackRange, AttackInterval, AttackNoiseRange - native gameplay tags `MassWar.Stat.*`), project stats in Project Settings > MassWar Stats (`UMassWarStatSettings::CustomStats`, tag + default; append-only,
+the position is the id; max 64 total), `FMassWarStatModifier` {tag, Set/Add/Multiply, value} with value = (setValue + sum(Add)) * product(Multiply), `UMassWarStatSet` data asset (reusable modifier list),
+`UMassWarStatsTrait` ("MassWar Stats": modifiers + stat sets for a unit type), `UMassWarStatSubsystem` (world subsystem: registry, drafts, resolved flat table, `GetView()` -> `FView::Get(profile, stat)`,
+`GetValue(EntityManager, Entity, Stat|Tag)`, console `MassWar.Stats.Dump`), `FMassWarStatProfileFragment` (2 bytes per unit: index of the unit type's profile). Order-independent build: whichever trait asks first creates the
+profile (`GetOrCreateProfile` via `BuildContext.GetFragment`), the others contribute (`ContributeBase/Modifier/StatSet`); profiles resolve lazily (thread-safe) and space for 256 profiles is reserved so views stay valid.
+Converted consumers, no behaviour change: `MassWar Unit` trait now contributes MoveSpeed/TurnRate/AcceptanceRadius/AttackStopDistance/AvoidanceRadius/AvoidanceStrength/DeathLingerTime, `MassWar Combat` contributes
+MaxHealth/AttackDamage/AttackRange/AttackInterval/AttackNoiseRange; `FMassWarMovementParamsFragment` removed, `FMassWarAvoidanceFragment` is now an opt-in marker, `FMassWarCombatParamsFragment` became
+`FMassWarAttackCooldownFragment` (state only); OrderMovement, Separation and Damage processors read stats. Health/Life fragments still hold their own copies (resources are pass 3). Existing unit configs need no change.
+Verified headless: resolved values equal the unit's trait values; Multiply/Add/Set modifiers, a project stat with default and an unknown-stat modifier (ignored with a warning); a 150 vs 900-unit fight with ordered
+attacks (10 damage per hit, enemies die) through the converted movement/separation/damage code. Not done: Blueprint access to per-unit stats, replication of stats, weapons/ammo as stat sources.
+
+**User-defined data - pass 1b: replicated stat sets (2026-10-22, branch feature/stats).** Profile indices are local to each machine (every machine builds its own unit templates, so its own profile table) and are never sent. What replicates is a unit's
+*recipe*: up to 4 catalogued stat-set ids (`FMassWarStatSetsFragment`, added by the MassWar Unit trait; packed to `FReplicatedWarAgent::StatSetsPacked`, re-sent on change like the loadout). The catalog is
+`UMassWarStatSettings::StatSetCatalog` (Project Settings > MassWar Stats; id = position + 1, append-only, max 255; server and clients share it through DefaultGame.ini). `UMassWarStatSubsystem`: `AddEntityStatSet / RemoveEntityStatSet /
+SetEntityStatSets` (server), `ApplyStatSets` (shared; clients call it from the bubble handler on add and on change), `FindStatSetId`, `GetStatSet`, `SetCatalogOverride`. A unit's profile is *derived* from its unit type's profile plus its sets:
+a copy of the type's draft with the sets' modifiers appended, deduplicated by (type profile, ids) so all units with the same recipe share one profile (hard cap `MaxProfiles` = 1024, storage reserved so processor views stay valid).
+Spawning: `FMassWarUnitSpawnEntry::StatSets` (must be catalogued; warns otherwise). Verified with a headless dedicated server + client: sets added/removed on the server arrive on the client and derive identical numbers
+(A+B -> range 3000 speed 550, A -> 3000/500, B only -> 1000/550, none -> 1000/500), 3 derived profiles shared by ~160 units. Not done: Blueprint access, health/resources replication (pass 3), weapons/ammo as automatic sources (pass 2: a weapon's stat set
+will be derived from the loadout on both sides, so it needs no extra replication).

@@ -24,6 +24,7 @@
 #include "Formation/MassWarFormationSubsystem.h"
 #include "Weapons/MassWarWeaponSubsystem.h"
 #include "Spawning/MassWarSpawnSubsystem.h"
+#include "Stats/MassWarStatSubsystem.h"
 #include "Spawning/MassWarFormationTemplate.h"
 
 AMassWarDemoGameMode::AMassWarDemoGameMode()
@@ -166,6 +167,7 @@ void AMassWarDemoGameMode::HandleStartingNewPlayer_Implementation(APlayerControl
 		if (!PlayerFormations.IsEmpty())
 		{
 			SpawnFormationsForPlayer(PlayerId, TeamId, Origin);
+						
 		}
 		else
 		{
@@ -588,7 +590,7 @@ void AMassWarDemoGameMode::LogEntityDiagnostics()
 		const FMassRepresentationFragment* Rep = EntityManager.GetFragmentDataPtr<FMassRepresentationFragment>(Entity);
 		const FMassRepresentationLODFragment* RepLOD = EntityManager.GetFragmentDataPtr<FMassRepresentationLODFragment>(Entity);
 		const FMassActorFragment* ActorFrag = EntityManager.GetFragmentDataPtr<FMassActorFragment>(Entity);
-		const FMassWarCombatParamsFragment* Combat = EntityManager.GetFragmentDataPtr<FMassWarCombatParamsFragment>(Entity);
+		const UMassWarStatSubsystem* StatSubsystem = GetWorld()->GetSubsystem<UMassWarStatSubsystem>();
 		const FMassWarHealthFragment* Health = EntityManager.GetFragmentDataPtr<FMassWarHealthFragment>(Entity);
 
 		UE_LOG(LogTemp, Warning, TEXT("  Entity %s: Loc=%s HasRepFragment=%d HasLODFragment=%d HasActorFragment=%d CurrentRep=%s LOD=%d Visibility=%d Significance=%.2f StaticMeshDescHandle=%d ActorValid=%d HasCombatFragment=%d AttackRange=%.1f AttackDamage=%.1f AttackInterval=%.2f Health=%.1f/%.1f"),
@@ -603,10 +605,10 @@ void AMassWarDemoGameMode::LogEntityDiagnostics()
 			RepLOD ? RepLOD->LODSignificance : -1.f,
 			Rep ? Rep->StaticMeshDescHandle.ToIndex() : -1,
 			ActorFrag && ActorFrag->Get() != nullptr,
-			Combat != nullptr,
-			Combat ? Combat->AttackRange : -1.f,
-			Combat ? Combat->AttackDamage : -1.f,
-			Combat ? Combat->AttackInterval : -1.f,
+			StatSubsystem != nullptr,
+			StatSubsystem ? StatSubsystem->GetValue(EntityManager, Entity, EMassWarStat::AttackRange) : -1.f,
+			StatSubsystem ? StatSubsystem->GetValue(EntityManager, Entity, EMassWarStat::AttackDamage) : -1.f,
+			StatSubsystem ? StatSubsystem->GetValue(EntityManager, Entity, EMassWarStat::AttackInterval) : -1.f,
 			Health ? Health->Health : -1.f,
 			Health ? Health->MaxHealth : -1.f);
 	}

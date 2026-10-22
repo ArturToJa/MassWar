@@ -5,6 +5,8 @@
 #include "Formation/MassWarFormationSubsystem.h"
 #include "Registry/MassWarUnitRegistrySubsystem.h"
 #include "Fragments/MassWarUnitFragments.h"
+#include "Stats/MassWarStatSubsystem.h"
+#include "Stats/MassWarStatSet.h"
 #include "MassCommonFragments.h"
 #include "MassEntityConfigAsset.h"
 #include "MassEntityManager.h"
@@ -62,6 +64,7 @@ bool UMassWarSpawnSubsystem::SpawnRoster(const TArray<FMassWarUnitSpawnEntry>& R
 	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
 	UMassWarUnitRegistrySubsystem* Registry = World->GetSubsystem<UMassWarUnitRegistrySubsystem>();
 	const UMassWarWeaponSubsystem* Weapons = World->GetSubsystem<UMassWarWeaponSubsystem>();
+	UMassWarStatSubsystem* Stats = World->GetSubsystem<UMassWarStatSubsystem>();
 
 	// One grid for the whole roster, centred on Location and turned to face YawDegrees.
 	const int32 Columns = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt(static_cast<float>(Total))));
@@ -84,6 +87,20 @@ bool UMassWarSpawnSubsystem::SpawnRoster(const TArray<FMassWarUnitSpawnEntry>& R
 		const bool bHasLoadout = Entry.Loadout.Primary || Entry.Loadout.Secondary || Entry.Loadout.Special;
 		bool bWarnedTeam = false;
 		bool bWarnedWeapons = false;
+
+		// The entry's stat sets as catalog ids (only catalogued sets can replicate).
+		uint8 StatSetIds[MassWarMaxRuntimeStatSets] = { 0, 0, 0, 0 };
+		int32 NumStatSets = 0;
+		for (const UMassWarStatSet* StatSet : Entry.StatSets)
+		{
+			const uint8 Id = Stats ? Stats->FindStatSetId(StatSet) : 0;
+			if (Id == 0 || NumStatSets >= MassWarMaxRuntimeStatSets)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("MassWarSpawning: stat set %s of %s ignored - it must be in Project Settings > MassWar Stats > Stat Set Catalog (and at most %d per unit)."), *GetNameSafe(StatSet), *GetNameSafe(Entry.Config), MassWarMaxRuntimeStatSets);
+				continue;
+			}
+			StatSetIds[NumStatSets++] = Id;
+		}
 
 		for (const FMassEntityHandle& Entity : Spawned)
 		{
@@ -113,6 +130,11 @@ bool UMassWarSpawnSubsystem::SpawnRoster(const TArray<FMassWarUnitSpawnEntry>& R
 				const int32 Column = Index % Columns;
 				const FVector Local((Row - (Rows - 1) * 0.5f) * Step, (Column - (Columns - 1) * 0.5f) * Step, 0.f);
 				Transform->SetTransform(FTransform(Facing, Location + Facing.RotateVector(Local)));
+			}
+
+			if (NumStatSets > 0)
+			{
+				Stats->SetEntityStatSets(EntityManager, Entity, TConstArrayView<uint8>(StatSetIds, MassWarMaxRuntimeStatSets));
 			}
 
 			if (bHasLoadout && Weapons && !Weapons->ApplyLoadout(EntityManager, Entity, Entry.Loadout) && !bWarnedWeapons)

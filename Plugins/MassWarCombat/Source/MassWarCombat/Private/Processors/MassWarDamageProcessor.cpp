@@ -5,6 +5,7 @@
 #include "MassExecutionContext.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "Fragments/MassWarCombatFragments.h"
+#include "Stats/MassWarStatSubsystem.h"
 #include "UnitBrain/MassWarUnitStateView.h"
 #include "Fragments/MassWarPerceptionFragments.h"
 #include "Perception/MassWarPerceptionSubsystem.h"
@@ -20,7 +21,8 @@ UMassWarDamageProcessor::UMassWarDamageProcessor()
 void UMassWarDamageProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FMassWarOrderFragment>(EMassFragmentAccess::ReadWrite);
-	EntityQuery.AddRequirement<FMassWarCombatParamsFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassWarAttackCooldownFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassWarStatProfileFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarAttackFeedbackFragment>(EMassFragmentAccess::ReadWrite);
@@ -35,10 +37,18 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 	UWorld* World = GetWorld();
 	UMassWarPerceptionSubsystem* PerceptionSubsystem = World ? World->GetSubsystem<UMassWarPerceptionSubsystem>() : nullptr;
 
-	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime, PerceptionSubsystem](FMassExecutionContext& Context)
+	const UMassWarStatSubsystem* StatSubsystem = World ? World->GetSubsystem<UMassWarStatSubsystem>() : nullptr;
+	if (!StatSubsystem)
+	{
+		return;
+	}
+	const UMassWarStatSubsystem::FView Stats = StatSubsystem->GetView();
+
+	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime, PerceptionSubsystem, Stats](FMassExecutionContext& Context)
 	{
 		const TArrayView<FMassWarOrderFragment> Orders = Context.GetMutableFragmentView<FMassWarOrderFragment>();
-		const TArrayView<FMassWarCombatParamsFragment> CombatParamsList = Context.GetMutableFragmentView<FMassWarCombatParamsFragment>();
+		const TArrayView<FMassWarAttackCooldownFragment> CooldownList = Context.GetMutableFragmentView<FMassWarAttackCooldownFragment>();
+		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
 		const TConstArrayView<FTransformFragment> Transforms = Context.GetFragmentView<FTransformFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList = Context.GetMutableFragmentView<FMassWarAttackFeedbackFragment>();
@@ -81,39 +91,42 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 				continue;
 			}
 
-			FMassWarCombatParamsFragment& Combat = CombatParamsList[It];
-			Combat.TimeSinceLastAttack += DeltaTime;
+			FMassWarAttackCooldownFragment& Cooldown = CooldownList[It];
+			const uint16 Profile = ProfileList[It].ProfileIndex;
+			Cooldown.TimeSinceLastAttack += DeltaTime;
 
 			const float Distance = FVector::Dist(Transforms[It].GetTransform().GetLocation(), TargetView.GetLocation());
-			if (Distance > Combat.AttackRange)
+			if (Distance > Stats.Get(Profile, EMassWarStat::AttackRange))
 			{
 				continue;
 			}
 
-			if (Combat.TimeSinceLastAttack < Combat.AttackInterval)
+			if (Cooldown.TimeSinceLastAttack < Stats.Get(Profile, EMassWarStat::AttackInterval))
 			{
 				continue;
 			}
 
-			Combat.TimeSinceLastAttack = 0.f;
+			Cooldown.TimeSinceLastAttack = 0.f;
+			const float AttackDamage = Stats.Get(Profile, EMassWarStat::AttackDamage);
 			++AttackFeedbackList[It].AttackCounter; // wraps; lets every machine's puppet play an attack animation
-			TargetHealth->Health -= Combat.AttackDamage;
+			TargetHealth->Health -= AttackDamage;
 
 			// Tell perception: the victim now knows who hit it and from where, and enemies nearby hear the attack.
 			if (PerceptionSubsystem)
 			{
 				const FMassEntityHandle Attacker = Context.GetEntity(It);
 				const FVector AttackerLocation = Transforms[It].GetTransform().GetLocation();
-				PerceptionSubsystem->ReportDamage(EntityManager, Order.TargetEntity, Attacker, AttackerLocation, Combat.AttackDamage);
-				if (Combat.AttackNoiseRange > 0.f)
+				PerceptionSubsystem->ReportDamage(EntityManager, Order.TargetEntity, Attacker, AttackerLocation, AttackDamage);
+				const float NoiseRange = Stats.Get(Profile, EMassWarStat::AttackNoiseRange);
+				if (NoiseRange > 0.f)
 				{
 					const FMassWarTeamFragment* AttackerTeam = EntityManager.GetFragmentDataPtr<FMassWarTeamFragment>(Attacker);
-					PerceptionSubsystem->ReportNoise(AttackerLocation, Combat.AttackNoiseRange, Attacker, AttackerTeam ? AttackerTeam->TeamId : 0);
+					PerceptionSubsystem->ReportNoise(AttackerLocation, NoiseRange, Attacker, AttackerTeam ? AttackerTeam->TeamId : 0);
 				}
 			}
 
 			UE_LOG(LogTemp, Log, TEXT("MassWarDamageProcessor: dealt %.1f damage to %s, health now %.1f"),
-				Combat.AttackDamage, *Order.TargetEntity.DebugGetDescription(), TargetHealth->Health);
+				AttackDamage, *Order.TargetEntity.DebugGetDescription(), TargetHealth->Health);
 
 			if (TargetHealth->Health <= 0.f)
 			{

@@ -18,29 +18,15 @@ struct MASSWARCOMBAT_API FMassWarHealthFragment : public FMassFragment
 };
 
 /**
- * Config (damage/range/interval) and per-entity attack-cooldown state. Kept in one fragment for
- * simplicity in this scaffold rather than splitting config into a shared fragment.
+ * Per-unit attack cooldown state. The numbers that decide how and when a unit attacks (damage, range, interval, noise
+ * range) are stats (EMassWarStat::AttackDamage / AttackRange / AttackInterval / AttackNoiseRange), not fields here.
  */
 USTRUCT()
-struct MASSWARCOMBAT_API FMassWarCombatParamsFragment : public FMassFragment
+struct MASSWARCOMBAT_API FMassWarAttackCooldownFragment : public FMassFragment
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, Category = "MassWar|Combat")
-	float AttackDamage = 10.f;
-
-	UPROPERTY(EditAnywhere, Category = "MassWar|Combat")
-	float AttackRange = 800.f;
-
-	UPROPERTY(EditAnywhere, Category = "MassWar|Combat")
-	float AttackInterval = 1.f;
-
-	/** How far (uu) enemies can hear this unit's attacks - reported to MassWarPerception on every landed attack.
-	 *  0 = a silent attacker. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Combat")
-	float AttackNoiseRange = 2500.f;
-
-	/** Seconds accumulated since the last successful attack; processor-owned runtime state. */
+	/** Seconds accumulated since the last successful attack; processor-owned runtime state. Starts high: ready to fire. */
 	UPROPERTY(Transient)
-	float TimeSinceLastAttack = 0.f;
+	float TimeSinceLastAttack = 1.e6f;
 };

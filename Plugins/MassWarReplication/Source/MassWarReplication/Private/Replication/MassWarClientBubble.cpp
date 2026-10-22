@@ -2,6 +2,7 @@
 
 #include "Replication/MassWarClientBubble.h"
 #include "Fragments/MassWarUnitFragments.h"
+#include "Stats/MassWarStatSubsystem.h"
 #include "Registry/MassWarUnitRegistrySubsystem.h"
 #include "Smoothing/MassWarClientInterpolationFragment.h"
 #include "Net/UnrealNetwork.h"
@@ -11,20 +12,39 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(MassWarClientBubble)
 
+#if UE_REPLICATION_COMPILE_CLIENT_CODE
+namespace
+{
+	/** Client side: gives the unit the stat sets the server says it has, which switches it to the matching derived stat profile. */
+	void ApplyReplicatedStatSets(const UWorld* World, const FMassEntityView& EntityView, const uint32 Packed)
+	{
+		UMassWarStatSubsystem* Stats = World ? World->GetSubsystem<UMassWarStatSubsystem>() : nullptr;
+		FMassWarStatProfileFragment* Profile = EntityView.GetFragmentDataPtr<FMassWarStatProfileFragment>();
+		FMassWarStatSetsFragment* StatSets = EntityView.GetFragmentDataPtr<FMassWarStatSetsFragment>();
+		if (Stats && Profile && StatSets)
+		{
+			FMassWarStatSetsFragment Unpacked;
+			Unpacked.Unpack(Packed);
+			Stats->ApplyStatSets(*Profile, *StatSets, TConstArrayView<uint8>(Unpacked.Ids, MassWarMaxRuntimeStatSets));
+		}
+	}
+}
+#endif // UE_REPLICATION_COMPILE_CLIENT_CODE
 #if UE_REPLICATION_COMPILE_SERVER_CODE
-void FMassWarClientBubbleHandler::SetAgentDynamicState(const FMassReplicatedAgentHandle Handle, const uint8 LifeState, const uint8 AttackCounter, const uint32 FormationId, const uint32 LoadoutPacked)
+void FMassWarClientBubbleHandler::SetAgentDynamicState(const FMassReplicatedAgentHandle Handle, const uint8 LifeState, const uint8 AttackCounter, const uint32 FormationId, const uint32 LoadoutPacked, const uint32 StatSetsPacked)
 {
 	check(AgentHandleManager.IsValidHandle(Handle));
 
 	const int32 AgentsIdx = AgentLookupArray[Handle.GetIndex()].AgentsIdx;
 	FMassWarFastArrayItem& Item = (*Agents)[AgentsIdx];
 
-	if (Item.Agent.LifeState != LifeState || Item.Agent.AttackCounter != AttackCounter || Item.Agent.FormationId != FormationId || Item.Agent.LoadoutPacked != LoadoutPacked)
+	if (Item.Agent.LifeState != LifeState || Item.Agent.AttackCounter != AttackCounter || Item.Agent.FormationId != FormationId || Item.Agent.LoadoutPacked != LoadoutPacked || Item.Agent.StatSetsPacked != StatSetsPacked)
 	{
 		Item.Agent.LifeState = LifeState;
 		Item.Agent.AttackCounter = AttackCounter;
 		Item.Agent.FormationId = FormationId;
 		Item.Agent.LoadoutPacked = LoadoutPacked;
+		Item.Agent.StatSetsPacked = StatSetsPacked;
 		Serializer->MarkItemDirty(Item);
 	}
 }
@@ -102,6 +122,8 @@ void FMassWarClientBubbleHandler::PostReplicatedAdd(const TArrayView<int32> Adde
 			Loadout->Unpack(ReplicatedEntity.LoadoutPacked);
 		}
 
+		ApplyReplicatedStatSets(Serializer ? Serializer->GetWorld() : nullptr, EntityView, ReplicatedEntity.StatSetsPacked);
+
 		// Initialize the smoothing target to the just-placed position/rotation so the first update we
 		// receive later interpolates from here, not from the fragment's zeroed default.
 		if (FMassWarClientInterpolationFragment* Interp = EntityView.GetFragmentDataPtr<FMassWarClientInterpolationFragment>())
@@ -172,6 +194,8 @@ void FMassWarClientBubbleHandler::PostReplicatedChangeEntity(const FMassEntityVi
 	{
 		Loadout->Unpack(Item.LoadoutPacked);
 	}
+
+	ApplyReplicatedStatSets(Serializer ? Serializer->GetWorld() : nullptr, EntityView, Item.StatSetsPacked);
 
 	// Feed the smoothing target rather than hard-snapping FTransformFragment, so
 	// UMassWarClientInterpolationProcessor can chase it smoothly instead of teleporting on every update.

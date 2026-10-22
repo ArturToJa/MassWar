@@ -3,6 +3,7 @@
 #include "Traits/MassWarCombatTrait.h"
 #include "MassEntityTemplateRegistry.h"
 #include "Fragments/MassWarCombatFragments.h"
+#include "Stats/MassWarStatSubsystem.h"
 
 void UMassWarCombatTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
 {
@@ -10,10 +11,12 @@ void UMassWarCombatTrait::BuildTemplate(FMassEntityTemplateBuildContext& BuildCo
 	Health.MaxHealth = MaxHealth;
 	Health.Health = MaxHealth;
 
-	FMassWarCombatParamsFragment& Combat = BuildContext.AddFragment_GetRef<FMassWarCombatParamsFragment>();
-	Combat.AttackDamage = AttackDamage;
-	Combat.AttackRange = AttackRange;
-	Combat.AttackInterval = AttackInterval;
-	Combat.AttackNoiseRange = AttackNoiseRange;
-	Combat.TimeSinceLastAttack = AttackInterval;
+	BuildContext.AddFragment<FMassWarAttackCooldownFragment>();
+
+	// Attack numbers are stats; this trait supplies the unit type's base values (see MassWarStats).
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::MaxHealth, MaxHealth);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AttackDamage, AttackDamage);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AttackRange, AttackRange);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AttackInterval, AttackInterval);
+	UMassWarStatSubsystem::ContributeBase(BuildContext, World, EMassWarStat::AttackNoiseRange, AttackNoiseRange);
 }
