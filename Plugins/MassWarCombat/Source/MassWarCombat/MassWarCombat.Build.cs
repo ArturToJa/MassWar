@@ -22,5 +22,10 @@ public class MassWarCombat : ModuleRules
 				"DeveloperSettings",
 			}
 			);
+		// Since UE 5.8 the core Mass types (FMassFragment, FMassEntityHandle, FTransformFragment...) live in their own module.
+		if (Target.Version.MajorVersion > 5 || Target.Version.MinorVersion >= 8)
+		{
+			PublicDependencyModuleNames.Add("MassCore");
+		}
 	}
 }

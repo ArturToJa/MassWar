@@ -12,7 +12,11 @@
 UMassWarLoadoutStatsObserver::UMassWarLoadoutStatsObserver()
 	: EntityQuery(*this)
 {
+#if ENGINE_MAJOR_VERSION > 5 || ENGINE_MINOR_VERSION >= 8
+	ObservedTypes = { FMassWarLoadoutFragment::StaticStruct() };
+#else
 	ObservedType = FMassWarLoadoutFragment::StaticStruct();
+#endif
 	ObservedOperations = EMassObservedOperationFlags::Add;
 	ExecutionFlags = (int32)EProcessorExecutionFlags::AllWorldModes;
 	// Stat calculators may be Blueprints, which only run on the game thread.

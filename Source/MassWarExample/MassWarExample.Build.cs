@@ -39,5 +39,11 @@ public class MassWarExample : ModuleRules
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");
 
 		// To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
+
+		// Since UE 5.8 the core Mass types (FMassFragment, FMassEntityHandle, FTransformFragment...) live in their own module.
+		if (Target.Version.MajorVersion > 5 || Target.Version.MinorVersion >= 8)
+		{
+			PublicDependencyModuleNames.Add("MassCore");
+		}
 	}
 }

@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.7",
+	"EngineAssociation": "{9B31867B-4B2D-C585-92A2-308E0E4BE662}",
 	"Category": "",
 	"Description": "",
 	"Modules": [
@@ -77,10 +77,6 @@
 		},
 		{
 			"Name": "MassCrowd",
-			"Enabled": true
-		},
-		{
-			"Name": "MassEntity",
 			"Enabled": true
 		},
 		{
