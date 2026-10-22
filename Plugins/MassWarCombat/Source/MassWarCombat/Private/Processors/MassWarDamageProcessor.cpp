@@ -8,6 +8,7 @@
 #include "Stats/MassWarStatSubsystem.h"
 #include "Rules/MassWarDamageRule.h"
 #include "Fragments/MassWarAmmoUtil.h"
+#include "Orders/MassWarOrderTypes.h"
 #include "UnitBrain/MassWarUnitStateView.h"
 #include "Fragments/MassWarPerceptionFragments.h"
 #include "Perception/MassWarPerceptionSubsystem.h"
@@ -36,6 +37,7 @@ void UMassWarDamageProcessor::ConfigureQueries(const TSharedRef<FMassEntityManag
 	// Only units whose unit type carries weapons have ammunition.
 	EntityQuery.AddRequirement<FMassWarAmmoFragment>(EMassFragmentAccess::ReadWrite, EMassFragmentPresence::Optional);
 	EntityQuery.AddRequirement<FMassWarLoadoutFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
+	EntityQuery.AddRequirement<FMassWarCustomOrderFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 }
 
 void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -60,6 +62,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
 		const TArrayView<FMassWarAmmoFragment> AmmoList = Context.GetMutableFragmentView<FMassWarAmmoFragment>();
 		const TConstArrayView<FMassWarLoadoutFragment> LoadoutList = Context.GetFragmentView<FMassWarLoadoutFragment>();
+		const TConstArrayView<FMassWarCustomOrderFragment> CustomList = Context.GetFragmentView<FMassWarCustomOrderFragment>();
 		const TConstArrayView<FTransformFragment> Transforms = Context.GetFragmentView<FTransformFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList = Context.GetMutableFragmentView<FMassWarAttackFeedbackFragment>();
@@ -73,7 +76,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 			{
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 				continue;
 			}
 
@@ -88,7 +91,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 			{
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 				continue;
 			}
 
@@ -98,7 +101,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 				// Target has no health (e.g. MassWarCombat trait not on its config) - nothing to do.
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 				continue;
 			}
 
@@ -201,7 +204,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 			}
 		}
 	});

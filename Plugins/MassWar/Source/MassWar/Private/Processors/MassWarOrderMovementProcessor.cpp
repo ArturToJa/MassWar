@@ -7,6 +7,7 @@
 #include "Fragments/MassWarUnitFragments.h"
 #include "UnitBrain/MassWarUnitStateView.h"
 #include "Stats/MassWarStatSubsystem.h"
+#include "Orders/MassWarOrderTypes.h"
 #include "Engine/World.h"
 
 namespace
@@ -29,6 +30,7 @@ void UMassWarOrderMovementProcessor::ConfigureQueries(const TSharedRef<FMassEnti
 	EntityQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassWarStatProfileFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassWarCustomOrderFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.AddRequirement<FMassWarNavPathFragment>(EMassFragmentAccess::ReadWrite, EMassFragmentPresence::Optional);
 }
 
@@ -49,6 +51,7 @@ void UMassWarOrderMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 		const TArrayView<FMassVelocityFragment> Velocities = Context.GetMutableFragmentView<FMassVelocityFragment>();
 		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
+		const TConstArrayView<FMassWarCustomOrderFragment> CustomList = Context.GetFragmentView<FMassWarCustomOrderFragment>();
 		// Only present for units that route around obstacles (bUseNavMesh); empty for the rest.
 		const TArrayView<FMassWarNavPathFragment> NavList = Context.GetMutableFragmentView<FMassWarNavPathFragment>();
 
@@ -153,7 +156,7 @@ void UMassWarOrderMovementProcessor::Execute(FMassEntityManager& EntityManager, 
 				if (Order.OrderType == EMassWarOrderType::Move)
 				{
 					Order.OrderType = EMassWarOrderType::Idle;
-					Order.bPlayerCommanded = false;
+					MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 				}
 				// Attack orders stay Attack once in range - MassWarCombat's damage processor takes it from here.
 			}

@@ -7,6 +7,7 @@
 #include "MassExecutionContext.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "Stats/MassWarStatSubsystem.h"
+#include "Orders/MassWarOrderTypes.h"
 #include "Engine/World.h"
 #include "Async/ParallelFor.h"
 
@@ -48,6 +49,7 @@ void UMassWarSeparationProcessor::ConfigureQueries(const TSharedRef<FMassEntityM
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassWarOrderFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassWarCustomOrderFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 }
 
 void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -205,6 +207,7 @@ void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMa
 		const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
 		const TArrayView<FMassVelocityFragment> VelocityList = Context.GetMutableFragmentView<FMassVelocityFragment>();
 		const TArrayView<FMassWarOrderFragment> OrderList = Context.GetMutableFragmentView<FMassWarOrderFragment>();
+		const TConstArrayView<FMassWarCustomOrderFragment> CustomList = Context.GetFragmentView<FMassWarCustomOrderFragment>();
 
 		for (int32 Index = 0; Index < Context.GetNumEntities(); ++Index, ++GlobalIndex)
 		{
@@ -223,7 +226,7 @@ void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMa
 				if (FVector::Dist2D(Location, Order.Destination) <= StopDistance + BlockedArrivalRadii * Stats.Get(Profile, EMassWarStat::AvoidanceRadius))
 				{
 					Order.OrderType = EMassWarOrderType::Idle;
-					Order.bPlayerCommanded = false;
+					MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[Index]);
 					VelocityList[Index].Value = FVector::ZeroVector;
 				}
 			}

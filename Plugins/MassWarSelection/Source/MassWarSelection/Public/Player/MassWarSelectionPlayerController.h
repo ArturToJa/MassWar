@@ -44,6 +44,18 @@ public:
 	void SetPlayerId(uint32 InPlayerId) { PlayerId = InPlayerId; }
 	uint32 GetPlayerId() const { return PlayerId; }
 
+	/**
+	 * Gives the current selection a user-defined order (Project Settings > MassWar Orders): selected formations get it through their formation,
+	 * selected units that belong to none get it individually. Location / Location2 / Param mean whatever the order's behaviour says
+	 * (a patrol's two end points...). Call this from your input handling or UI; it sends the order to the server.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MassWar|Orders")
+	void IssueCustomOrderToSelection(const class UMassWarOrderDefinition* Order, FVector Location, FVector Location2, float Param = 0.f);
+
+	/** The same, with Location set to the point of the world under the mouse cursor. Returns false if the cursor is over nothing. */
+	UFUNCTION(BlueprintCallable, Category = "MassWar|Orders")
+	bool IssueCustomOrderAtCursor(const class UMassWarOrderDefinition* Order, FVector Location2, float Param = 0.f);
+
 	//~ IMassWarTeamProvider
 	virtual uint8 GetMassWarPlayerTeamId() const override { return PlayerTeamId; }
 

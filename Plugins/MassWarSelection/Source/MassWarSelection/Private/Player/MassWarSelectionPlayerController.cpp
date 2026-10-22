@@ -2,6 +2,8 @@
 
 #include "Player/MassWarSelectionPlayerController.h"
 #include "Player/MassWarUnitOrderComponent.h"
+#include "Orders/MassWarOrderSubsystem.h"
+#include "Orders/MassWarOrderDefinition.h"
 #include "Selection/MassWarSelectionSubsystem.h"
 #include "Registry/MassWarUnitRegistrySubsystem.h"
 #include "Fragments/MassWarUnitFragments.h"
@@ -190,6 +192,47 @@ void AMassWarSelectionPlayerController::OnRightClickPressed()
 			OrderComponent->ServerIssueMoveOrder(MakeOrderTargets(*EntityManager, Unformed), Hit.Location);
 		}
 	}
+}
+
+void AMassWarSelectionPlayerController::IssueCustomOrderToSelection(const UMassWarOrderDefinition* Order, FVector Location, FVector Location2, float Param)
+{
+	ULocalPlayer* LP = GetLocalPlayer();
+	UMassWarSelectionSubsystem* SelectionSubsystem = LP ? LP->GetSubsystem<UMassWarSelectionSubsystem>() : nullptr;
+	UMassWarOrderSubsystem* Orders = GetWorld() ? GetWorld()->GetSubsystem<UMassWarOrderSubsystem>() : nullptr;
+	FMassEntityManager* EntityManager = GetEntityManager();
+	const uint8 OrderId = Orders ? Orders->FindOrderId(Order) : 0;
+	if (!SelectionSubsystem || !SelectionSubsystem->HasSelection() || !OrderComponent || !EntityManager || OrderId == 0)
+	{
+		return;
+	}
+
+	TArray<int32> FormationIds;
+	TArray<FMassEntityHandle> Unformed;
+	CollectFormationIds(SelectionSubsystem->GetSelection(), FormationIds, Unformed);
+	if (!FormationIds.IsEmpty())
+	{
+		OrderComponent->ServerIssueFormationCustomOrder(FormationIds, OrderId, Location, Location2, FMassWarOrderTarget(), Param);
+	}
+	if (!Unformed.IsEmpty())
+	{
+		OrderComponent->ServerIssueCustomOrder(MakeOrderTargets(*EntityManager, Unformed), OrderId, Location, Location2, FMassWarOrderTarget(), Param);
+	}
+}
+
+bool AMassWarSelectionPlayerController::IssueCustomOrderAtCursor(const UMassWarOrderDefinition* Order, FVector Location2, float Param)
+{
+	FVector WorldLocation, WorldDirection;
+	if (!DeprojectMousePositionToWorld(WorldLocation, WorldDirection))
+	{
+		return false;
+	}
+	FHitResult Hit;
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, WorldLocation, WorldLocation + WorldDirection * 100000.f, ECC_Visibility))
+	{
+		return false;
+	}
+	IssueCustomOrderToSelection(Order, Hit.Location, Location2, Param);
+	return true;
 }
 
 TArray<FMassEntityHandle> AMassWarSelectionPlayerController::ExpandToFormations(const TArray<FMassEntityHandle>& Units) const

@@ -54,7 +54,9 @@ enum class EMassWarFormationOrderType : uint8
 	Idle,
 	Move,
 	/** Attack another formation: the formation assigns each member a target inside it. */
-	Attack
+	Attack,
+	/** Members carry out a user-defined order (see UMassWarOrderSubsystem); over once none of them has one. */
+	Custom
 };
 
 /** Server-side formation record (see UMassWarFormationSubsystem). Deliberately plain data, not an entity:

@@ -7,6 +7,7 @@
 #include "MassMovementFragments.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "Stats/MassWarStatSubsystem.h"
+#include "Orders/MassWarOrderTypes.h"
 
 void UMassWarUnitTraitBase::BuildTemplate(FMassEntityTemplateBuildContext& BuildContext, const UWorld& World) const
 {
@@ -23,6 +24,7 @@ void UMassWarUnitTraitBase::BuildTemplate(FMassEntityTemplateBuildContext& Build
 	Team.TeamId = DefaultTeamId;
 
 	BuildContext.AddFragment<FMassWarOrderFragment>();
+	BuildContext.AddFragment<FMassWarCustomOrderFragment>(); // the user-defined order, if any (see MassWarOrderSubsystem)
 
 	FMassWarLifeFragment& Life = BuildContext.AddFragment_GetRef<FMassWarLifeFragment>();
 	Life.LingerTime = DeathLingerTime;

@@ -39,6 +39,17 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerIssueFormationAttackOrder(const TArray<int32>& FormationIds, int32 TargetFormationId);
 
+	/**
+	 * A user-defined order (see UMassWarOrderSubsystem / Project Settings > MassWar Orders) for individual units or whole formations.
+	 * OrderId is the order's id in the project settings. The server checks that the order exists and may be given by players, and that the
+	 * calling player owns every unit / formation named.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerIssueCustomOrder(const TArray<FMassWarOrderTarget>& Entities, int32 OrderId, FVector Location, FVector Location2, FMassWarOrderTarget Target, float Param);
+
+	UFUNCTION(Server, Reliable)
+	void ServerIssueFormationCustomOrder(const TArray<int32>& FormationIds, int32 OrderId, FVector Location, FVector Location2, FMassWarOrderTarget Target, float Param);
+
 private:
 	/** Trusts Handle only for a local (listen-server host) connection; NetId otherwise - see class comment. Invalid handle if it can't resolve. */
 	FMassEntityHandle ResolveTarget(FMassEntityManager& EntityManager, const FMassWarOrderTarget& Target) const;

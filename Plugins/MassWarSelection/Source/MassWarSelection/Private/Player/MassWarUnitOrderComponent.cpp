@@ -11,6 +11,8 @@
 #include "Engine/NetConnection.h"
 #include "Formation/MassWarFormationSubsystem.h"
 #include "MassEntityUtils.h"
+#include "Orders/MassWarOrderSubsystem.h"
+#include "Orders/MassWarOrderDefinition.h"
 
 UMassWarUnitOrderComponent::UMassWarUnitOrderComponent()
 {
@@ -67,6 +69,10 @@ void UMassWarUnitOrderComponent::ServerIssueMoveOrder_Implementation(const TArra
 			continue;
 		}
 
+		if (UMassWarOrderSubsystem* UserOrders = GetWorld()->GetSubsystem<UMassWarOrderSubsystem>())
+		{
+			UserOrders->CancelOrder(EntityManager, Entity, /*bStopUnit=*/ false); // a direct order replaces a user-defined one
+		}
 		if (FMassWarOrderFragment* Order = EntityManager.GetFragmentDataPtr<FMassWarOrderFragment>(Entity))
 		{
 			Order->OrderType = EMassWarOrderType::Move;
@@ -101,6 +107,10 @@ void UMassWarUnitOrderComponent::ServerIssueAttackOrder_Implementation(const TAr
 			continue;
 		}
 
+		if (UMassWarOrderSubsystem* UserOrders = GetWorld()->GetSubsystem<UMassWarOrderSubsystem>())
+		{
+			UserOrders->CancelOrder(EntityManager, Entity, /*bStopUnit=*/ false);
+		}
 		if (FMassWarOrderFragment* Order = EntityManager.GetFragmentDataPtr<FMassWarOrderFragment>(Entity))
 		{
 			Order->OrderType = EMassWarOrderType::Attack;
@@ -146,4 +156,60 @@ void UMassWarUnitOrderComponent::ServerIssueFormationAttackOrder_Implementation(
 		Ids.Add(static_cast<uint32>(Id));
 	}
 	Formations->IssueAttackOrder(UE::Mass::Utils::GetEntityManagerChecked(*World), Ids, static_cast<uint32>(TargetFormationId), OwningController->GetPlayerId());
+}
+
+void UMassWarUnitOrderComponent::ServerIssueCustomOrder_Implementation(const TArray<FMassWarOrderTarget>& Entities, int32 OrderId, FVector Location, FVector Location2, FMassWarOrderTarget Target, float Param)
+{
+	UWorld* World = GetWorld();
+	UMassSpawnerSubsystem* Spawner = World ? World->GetSubsystem<UMassSpawnerSubsystem>() : nullptr;
+	UMassWarOrderSubsystem* Orders = World ? World->GetSubsystem<UMassWarOrderSubsystem>() : nullptr;
+	const UMassWarOrderDefinition* Definition = Orders ? Orders->GetDefinition(static_cast<uint8>(FMath::Clamp(OrderId, 0, 255))) : nullptr;
+	if (!Spawner || !Definition || !Definition->bPlayerIssuable)
+	{
+		return;
+	}
+
+	FMassEntityManager& EntityManager = Spawner->GetEntityManagerChecked();
+	FMassWarOrderRequest Request;
+	Request.Location = Location;
+	Request.Location2 = Location2;
+	Request.Param = Param;
+	Request.Target = ResolveTarget(EntityManager, Target);
+
+	for (const FMassWarOrderTarget& OrderTarget : Entities)
+	{
+		const FMassEntityHandle Entity = ResolveTarget(EntityManager, OrderTarget);
+		if (IsOwnedByCallingPlayer(EntityManager, Entity))
+		{
+			Orders->IssueOrder(EntityManager, Entity, Definition, Request, /*bPlayerCommanded=*/ true);
+		}
+	}
+}
+
+void UMassWarUnitOrderComponent::ServerIssueFormationCustomOrder_Implementation(const TArray<int32>& FormationIds, int32 OrderId, FVector Location, FVector Location2, FMassWarOrderTarget Target, float Param)
+{
+	UWorld* World = GetWorld();
+	UMassWarFormationSubsystem* Formations = World ? World->GetSubsystem<UMassWarFormationSubsystem>() : nullptr;
+	UMassWarOrderSubsystem* Orders = World ? World->GetSubsystem<UMassWarOrderSubsystem>() : nullptr;
+	const AMassWarSelectionPlayerController* OwningController = GetOwner<AMassWarSelectionPlayerController>();
+	const UMassWarOrderDefinition* Definition = Orders ? Orders->GetDefinition(static_cast<uint8>(FMath::Clamp(OrderId, 0, 255))) : nullptr;
+	if (!Formations || !OwningController || !Definition || !Definition->bPlayerIssuable)
+	{
+		return;
+	}
+
+	FMassEntityManager& EntityManager = UE::Mass::Utils::GetEntityManagerChecked(*World);
+	FMassWarOrderRequest Request;
+	Request.Location = Location;
+	Request.Location2 = Location2;
+	Request.Param = Param;
+	Request.Target = ResolveTarget(EntityManager, Target);
+
+	TArray<uint32> Ids;
+	Ids.Reserve(FormationIds.Num());
+	for (const int32 Id : FormationIds)
+	{
+		Ids.Add(static_cast<uint32>(Id));
+	}
+	Formations->IssueCustomOrder(EntityManager, Ids, Definition, Request, OwningController->GetPlayerId());
 }
