@@ -6,6 +6,9 @@
 #include "MassMovementFragments.h"
 #include "MassExecutionContext.h"
 #include "Fragments/MassWarUnitFragments.h"
+#include "Stats/MassWarStatSubsystem.h"
+#include "Orders/MassWarOrderTypes.h"
+#include "Engine/World.h"
 #include "Async/ParallelFor.h"
 
 namespace
@@ -41,15 +44,23 @@ UMassWarSeparationProcessor::UMassWarSeparationProcessor()
 void UMassWarSeparationProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FMassWarAvoidanceFragment>(EMassFragmentAccess::ReadOnly);
-	EntityQuery.AddRequirement<FMassWarMovementParamsFragment>(EMassFragmentAccess::ReadOnly);
+	EntityQuery.AddRequirement<FMassWarStatProfileFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassVelocityFragment>(EMassFragmentAccess::ReadWrite);
 	EntityQuery.AddRequirement<FMassWarOrderFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassWarCustomOrderFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 }
 
 void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	const UMassWarStatSubsystem* StatSubsystem = EntityManager.GetWorld() ? EntityManager.GetWorld()->GetSubsystem<UMassWarStatSubsystem>() : nullptr;
+	if (!StatSubsystem)
+	{
+		return;
+	}
+	const UMassWarStatSubsystem::FView Stats = StatSubsystem->GetView();
+
 	// Pass 1: gather every avoiding unit into flat arrays (chunk order; pass 2 walks the same order).
 	Positions.Reset();
 	Radii.Reset();
@@ -58,7 +69,7 @@ void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMa
 
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Context)
 	{
-		const TConstArrayView<FMassWarAvoidanceFragment> AvoidanceList = Context.GetFragmentView<FMassWarAvoidanceFragment>();
+		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
 		const TConstArrayView<FMassVelocityFragment> VelocityList = Context.GetFragmentView<FMassVelocityFragment>();
@@ -66,7 +77,7 @@ void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMa
 		for (int32 Index = 0; Index < Context.GetNumEntities(); ++Index)
 		{
 			const FVector Location = TransformList[Index].GetTransform().GetLocation();
-			const float Radius = AvoidanceList[Index].Radius;
+			const float Radius = Stats.Get(ProfileList[Index].ProfileIndex, EMassWarStat::AvoidanceRadius);
 			Positions.Add(FVector2f(static_cast<float>(Location.X), static_cast<float>(Location.Y)));
 			Radii.Add(Radius);
 			uint8 UnitFlags = 0;
@@ -191,11 +202,12 @@ void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMa
 	int32 GlobalIndex = 0;
 	EntityQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Context)
 	{
-		const TConstArrayView<FMassWarAvoidanceFragment> AvoidanceList = Context.GetFragmentView<FMassWarAvoidanceFragment>();
-		const TConstArrayView<FMassWarMovementParamsFragment> ParamsList = Context.GetFragmentView<FMassWarMovementParamsFragment>();
+		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
+		
 		const TConstArrayView<FTransformFragment> TransformList = Context.GetFragmentView<FTransformFragment>();
 		const TArrayView<FMassVelocityFragment> VelocityList = Context.GetMutableFragmentView<FMassVelocityFragment>();
 		const TArrayView<FMassWarOrderFragment> OrderList = Context.GetMutableFragmentView<FMassWarOrderFragment>();
+		const TConstArrayView<FMassWarCustomOrderFragment> CustomList = Context.GetFragmentView<FMassWarCustomOrderFragment>();
 
 		for (int32 Index = 0; Index < Context.GetNumEntities(); ++Index, ++GlobalIndex)
 		{
@@ -203,18 +215,18 @@ void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMa
 			{
 				continue;
 			}
-			const FMassWarMovementParamsFragment& Params = ParamsList[Index];
+			const uint16 Profile = ProfileList[Index].ProfileIndex;
 			FMassWarOrderFragment& Order = OrderList[Index];
 
 			// A Move order held up by standing units close to its goal is as arrived as it will get.
 			if (Blocked[GlobalIndex] && Order.OrderType == EMassWarOrderType::Move)
 			{
-				const float StopDistance = Order.bStopAtAttackDistance ? Params.AttackStopDistance : Params.AcceptanceRadius;
+				const float StopDistance = Order.bStopAtAttackDistance ? Stats.Get(Profile, EMassWarStat::AttackStopDistance) : Stats.Get(Profile, EMassWarStat::AcceptanceRadius);
 				const FVector Location = TransformList[Index].GetTransform().GetLocation();
-				if (FVector::Dist2D(Location, Order.Destination) <= StopDistance + BlockedArrivalRadii * AvoidanceList[Index].Radius)
+				if (FVector::Dist2D(Location, Order.Destination) <= StopDistance + BlockedArrivalRadii * Stats.Get(Profile, EMassWarStat::AvoidanceRadius))
 				{
 					Order.OrderType = EMassWarOrderType::Idle;
-					Order.bPlayerCommanded = false;
+					MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[Index]);
 					VelocityList[Index].Value = FVector::ZeroVector;
 				}
 			}
@@ -224,8 +236,9 @@ void UMassWarSeparationProcessor::Execute(FMassEntityManager& EntityManager, FMa
 			{
 				continue;
 			}
-			FVector2f Add = UnitPush * (Params.MoveSpeed * AvoidanceList[Index].Strength);
-			const float MaxAdd = Params.MoveSpeed;
+			const float MoveSpeed = Stats.Get(Profile, EMassWarStat::MoveSpeed);
+			FVector2f Add = UnitPush * (MoveSpeed * Stats.Get(Profile, EMassWarStat::AvoidanceStrength));
+			const float MaxAdd = MoveSpeed;
 			const float AddSize = Add.Size();
 			if (AddSize > MaxAdd)
 			{

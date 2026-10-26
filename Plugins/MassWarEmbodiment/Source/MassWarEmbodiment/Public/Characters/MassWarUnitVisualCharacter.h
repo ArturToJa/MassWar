@@ -55,6 +55,17 @@ struct MASSWAREMBODIMENT_API FMassWarVisualState
 
 	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
 	bool bHasWeapon = false;
+
+	/** The weapon in hand is being reloaded - drive a reload pose or layer with this. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
+	bool bIsReloading = false;
+
+	/** Rounds in the magazine and in reserve of the weapon in hand; -1 when it has no ammo limit. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
+	int32 LoadedRounds = -1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Visual")
+	int32 ReserveRounds = -1;
 };
 
 /**
@@ -97,6 +108,10 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MassWar|Animation")
 	TArray<TObjectPtr<UAnimMontage>> AttackMontages;
+
+	/** Played when the unit starts reloading, unless its weapon brings its own (the weapon definition's Reload Montages). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MassWar|Animation")
+	TArray<TObjectPtr<UAnimMontage>> ReloadMontages;
 
 	/** The mesh shown in the unit's hand: whichever weapon is active (see UMassWarWeaponDefinition). Empty and
 	 *  hidden while the unit is unarmed. */
@@ -152,5 +167,9 @@ private:
 	void PlayMuzzleEffect();
 
 	void PlayAttack(uint8 AttackCounter, FMassEntityHandle Entity);
+	void PlayReload(FMassEntityHandle Entity);
 	void StopAttackMontages();
+
+	/** Whether the previous sync saw the unit reloading, to catch the moment a reload starts. */
+	bool bWasReloading = false;
 };

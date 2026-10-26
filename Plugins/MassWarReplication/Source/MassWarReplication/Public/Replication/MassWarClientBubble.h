@@ -28,9 +28,9 @@ public:
 #if UE_REPLICATION_COMPILE_SERVER_CODE
 	FMassWarTransformHandler& GetTransformHandlerMutable() { return TransformHandler; }
 
-	/** Updates the life state, attack counter, formation id and loadout sent for an already-added agent, marking it
+	/** Updates the life state, attack counter, formation id, loadout and stat sets sent for an already-added agent, marking it
 	 *  dirty only if any changed. */
-	void SetAgentDynamicState(FMassReplicatedAgentHandle Handle, uint8 LifeState, uint8 AttackCounter, uint32 FormationId, uint32 LoadoutPacked);
+	void SetAgentDynamicState(FMassReplicatedAgentHandle Handle, uint8 LifeState, uint8 AttackCounter, uint32 FormationId, uint32 LoadoutPacked, uint32 AmmoPacked, uint32 AmmoStatePacked, uint32 StatSetsPacked);
 #endif // UE_REPLICATION_COMPILE_SERVER_CODE
 
 protected:

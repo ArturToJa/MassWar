@@ -24,6 +24,13 @@ struct FMassWarPuppetEntityState
 
 	/** The weapon in hand: its id in the weapon catalog (FMassWarLoadoutFragment), 0 for none. */
 	uint8 ActiveWeaponId = 0;
+
+	/** The weapon in hand is being reloaded. */
+	bool bIsReloading = false;
+
+	/** Rounds in the magazine / in reserve of the weapon in hand; -1 when it has no ammo limit (or the unit has no ammunition state). */
+	int32 LoadedRounds = -1;
+	int32 ReserveRounds = -1;
 };
 
 /**

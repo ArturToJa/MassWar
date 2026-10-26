@@ -9,6 +9,8 @@
 
 class UMassWarWeaponDefinition;
 class UMassWarWeaponCatalog;
+class UMassWarAmmoCatalog;
+class UMassWarAmmoDefinition;
 struct FMassEntityManager;
 
 /** The weapons a unit should carry, by definition - what you hand over when you spawn a unit. Any slot may be empty. */
@@ -26,7 +28,18 @@ struct MASSWARWEAPONS_API FMassWarLoadout
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loadout")
 	TObjectPtr<UMassWarWeaponDefinition> Special;
 
+	/** The ammo for each slot's weapon; empty = that weapon's default ammo. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loadout")
+	TObjectPtr<UMassWarAmmoDefinition> PrimaryAmmo;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loadout")
+	TObjectPtr<UMassWarAmmoDefinition> SecondaryAmmo;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Loadout")
+	TObjectPtr<UMassWarAmmoDefinition> SpecialAmmo;
+
 	UMassWarWeaponDefinition* Get(EMassWarWeaponSlot Slot) const;
+	UMassWarAmmoDefinition* GetAmmo(EMassWarWeaponSlot Slot) const;
 };
 
 /**
@@ -44,6 +57,7 @@ class MASSWARWEAPONS_API UMassWarWeaponSubsystem : public UWorldSubsystem
 
 public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
 
 	/** The weapon behind an id from a loadout fragment (null for 0 / unknown). */
 	const UMassWarWeaponDefinition* GetDefinition(uint8 WeaponId) const;
@@ -63,14 +77,36 @@ public:
 	/** Takes the weapon in this slot into hand. Returns false if the unit has no loadout or the slot is empty. */
 	bool SetActiveSlot(FMassEntityManager& EntityManager, FMassEntityHandle Entity, EMassWarWeaponSlot Slot) const;
 
+	/** The ammo behind an id from a loadout fragment (null for 0 / unknown), and the id of an ammo (0 if null or not in the ammo catalog). */
+	const UMassWarAmmoDefinition* GetAmmo(uint8 AmmoId) const;
+	uint8 FindAmmoId(const UMassWarAmmoDefinition* Ammo) const;
+
+	/** Loads other ammo into a unit's weapon in this slot (must be accepted by that weapon). Returns false if the unit has no weapon there or the weapon does not accept it.
+	 *  Changes the unit's stats if that weapon is in hand. */
+	bool SetAmmo(FMassEntityManager& EntityManager, FMassEntityHandle Entity, EMassWarWeaponSlot Slot, const UMassWarAmmoDefinition* Ammo) const;
+
+	/** Starts a reload of the weapon in hand, on command (it also happens by itself when the magazine runs dry, if the AutoReload stat allows). False if there is nothing to reload:
+	 *  no weapon with a magazine, a full magazine, a reload already running, or no reserve ammo left. Server / standalone. */
+	bool Reload(FMassEntityManager& EntityManager, FMassEntityHandle Entity) const;
+	/** Replaces the ammo catalog from code instead of the project setting (tests, mods). */
+	void SetAmmoCatalogOverride(UMassWarAmmoCatalog* InCatalog);
 	/** Replaces the catalog from code instead of the project setting (tests, mods). */
 	void SetCatalogOverride(UMassWarWeaponCatalog* Catalog);
 
 private:
 	void RebuildLookup();
+	/** Re-derives the unit's stat profile after its weapon or ammo changed. */
+	void RefreshStats(FMassEntityManager& EntityManager, FMassEntityHandle Entity) const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMassWarWeaponCatalog> Catalog;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMassWarAmmoCatalog> AmmoCatalog;
+
+	/** Id (index + 1) -> ammo, built from the ammo catalog. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<const UMassWarAmmoDefinition>> AmmoById;
 
 	/** Id (index + 1) -> definition, built from the catalog. */
 	UPROPERTY(Transient)

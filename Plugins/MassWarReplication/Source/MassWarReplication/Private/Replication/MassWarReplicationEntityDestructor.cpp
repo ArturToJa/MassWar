@@ -12,7 +12,11 @@
 UMassWarReplicationEntityDestructor::UMassWarReplicationEntityDestructor()
 	: EntityQuery(*this)
 {
+#if ENGINE_MAJOR_VERSION > 5 || ENGINE_MINOR_VERSION >= 8
+	ObservedTypes = { FMassWarNetIdFragment::StaticStruct() };
+#else
 	ObservedType = FMassWarNetIdFragment::StaticStruct();
+#endif
 	ObservedOperations = EMassObservedOperationFlags::Remove;
 	ExecutionFlags = (int32)EProcessorExecutionFlags::Server;
 	// Touches the bubble actors (UObjects) via GetTypedClientBubble.

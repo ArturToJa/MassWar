@@ -7,6 +7,7 @@
 #include "MassWarSpawnTypes.generated.h"
 
 class UMassEntityConfigAsset;
+class UMassWarStatSet;
 
 /**
  * "Spawn this many units of this type, carrying these weapons." One line of a formation's roster.
@@ -29,6 +30,11 @@ struct MASSWARSPAWNING_API FMassWarUnitSpawnEntry
 	 *  Weapons are not separate things to spawn: a unit's weapons are just entries in its loadout. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassWar|Spawning")
 	FMassWarLoadout Loadout;
+
+	/** Stat sets applied to every unit of this entry from the start (upgrades, veterancy...; at most 4). They must be listed in
+	 *  Project Settings > MassWar Stats > Stat Set Catalog - that is how clients learn about them - and they replicate like any run-time stat set. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MassWar|Spawning")
+	TArray<TObjectPtr<UMassWarStatSet>> StatSets;
 };
 
 /** Everything needed to spawn one formation: its roster, who owns it, and where it appears. */

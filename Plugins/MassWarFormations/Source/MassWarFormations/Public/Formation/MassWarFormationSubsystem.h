@@ -50,7 +50,18 @@ public:
 	/** Server: Attack order against an enemy formation for the given formations (those RequesterPlayerId owns). */
 	void IssueAttackOrder(FMassEntityManager& EntityManager, TConstArrayView<uint32> FormationIds, uint32 TargetFormationId, uint32 RequesterPlayerId);
 
+	/**
+	 * Server: a user-defined order (see UMassWarOrderSubsystem) for the given formations (those RequesterPlayerId owns): every living
+	 * member is given it. If the order's definition keeps formation offsets, each member's locations are shifted by where it stands
+	 * relative to the formation's centre, so the formation keeps its shape (a patrol marches as a block); otherwise every member gets the
+	 * same locations. While members carry the order the formation's own automatic behaviour stays quiet.
+	 */
+	void IssueCustomOrder(FMassEntityManager& EntityManager, TConstArrayView<uint32> FormationIds, const class UMassWarOrderDefinition* Order, const struct FMassWarOrderRequest& Request, uint32 RequesterPlayerId);
+
 private:
+	/** Ends a unit's user-defined order, if it has one - a formation Move / Attack replaces it. */
+	void CancelUserOrder(FMassEntityManager& EntityManager, FMassEntityHandle Member) const;
+
 	/** Drops dead members, refreshes the anchor. Returns false if the formation is now empty. */
 	bool Refresh(FMassEntityManager& EntityManager, FMassWarFormation& Formation) const;
 

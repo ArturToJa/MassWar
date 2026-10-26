@@ -79,7 +79,7 @@ struct MASSWAR_API FMassWarOrderFragment : public FMassFragment
 	FMassEntityHandle TargetEntity;
 
 	/** Move orders only. False (a player's click order): the order completes when the unit is really at
-	 *  Destination (FMassWarMovementParamsFragment::AcceptanceRadius). True (an AI approach-to-engage move,
+	 *  Destination (the AcceptanceRadius stat). True (an AI approach-to-engage move,
 	 *  e.g. the StateTree's Move To Range): it completes once within AttackStopDistance of Destination -
 	 *  the unit only needs to get into fighting range, not onto the enemy. */
 	UPROPERTY(Transient)
@@ -212,49 +212,16 @@ struct TMassFragmentTraits<FMassWarNavPathFragment> final
 	};
 };
 
-/** Movement tuning consumed by MassWarOrderMovementProcessor to turn a Move order into velocity. */
-USTRUCT()
-struct MASSWAR_API FMassWarMovementParamsFragment : public FMassFragment
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float MoveSpeed = 500.f;
-
-	/** Move orders only: how close to the destination counts as "arrived" (order reverts to Idle, velocity
-	 *  zeroed). Keep this small - a Move order is not complete until the unit is really there. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float AcceptanceRadius = 50.f;
-
-	/** Attack orders only: how close the unit closes in on its target before it stops and lets combat take
-	 *  over (the order itself stays Attack). Keep this within the unit's attack range (MassWarCombat's
-	 *  AttackRange) or it will halt out of reach and never shoot. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float AttackStopDistance = 100.f;
-
-	/** Degrees per second the unit turns (yaw) toward the direction it is moving / the target it is
-	 *  attacking. Facing lives on the entity's transform so every representation (near Actor, far ISM
-	 *  instance, replicated client copy) shows the same heading. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Movement")
-	float TurnRate = 720.f;
-};
-
 /**
- * Opts a unit into unit-vs-unit separation (MassWarSeparationProcessor). Units without it neither push nor
+ * Opts a unit into unit-vs-unit separation (MassWarSeparationProcessor); its radius and strength come from its stats. Units without it neither push nor
  * are pushed - they pass through everyone.
  */
 USTRUCT()
 struct MASSWAR_API FMassWarAvoidanceFragment : public FMassFragment
 {
 	GENERATED_BODY()
-
-	/** Personal-space radius (uu). Two units are "touching" when their radii overlap. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Avoidance")
-	float Radius = 40.f;
-
-	/** How hard overlapping units push apart, as a fraction of MoveSpeed at full overlap. */
-	UPROPERTY(EditAnywhere, Category = "MassWar|Avoidance")
-	float Strength = 1.f;
+
+	// Radius and strength are stats (EMassWarStat::AvoidanceRadius / AvoidanceStrength).
 };
 
 /**
@@ -310,7 +277,21 @@ struct MASSWAR_API FMassWarLoadoutFragment : public FMassFragment
 	UPROPERTY(VisibleAnywhere, Category = "MassWar|Weapons")
 	uint8 ActiveSlot = NoActiveSlot;
 
+	/** The ammo loaded in each slot's weapon (ammo catalog id, 0 = none). Its stat set is part of the unit's stats while that weapon is in hand. */
+	UPROPERTY(VisibleAnywhere, Category = "MassWar|Weapons")
+	uint8 AmmoIds[MassWarWeaponSlotCount] = { 0, 0, 0 };
+
 	uint8 GetActiveWeaponId() const { return ActiveSlot < MassWarWeaponSlotCount ? WeaponIds[ActiveSlot] : 0; }
+	uint8 GetActiveAmmoId() const { return ActiveSlot < MassWarWeaponSlotCount ? AmmoIds[ActiveSlot] : 0; }
+
+	/** The three ammo ids in one value, for replication. */
+	uint32 PackAmmo() const { return static_cast<uint32>(AmmoIds[0]) | (static_cast<uint32>(AmmoIds[1]) << 8) | (static_cast<uint32>(AmmoIds[2]) << 16); }
+	void UnpackAmmo(uint32 Packed)
+	{
+		AmmoIds[0] = static_cast<uint8>(Packed);
+		AmmoIds[1] = static_cast<uint8>(Packed >> 8);
+		AmmoIds[2] = static_cast<uint8>(Packed >> 16);
+	}
 
 	/** All four bytes in one value, for replication. */
 	uint32 Pack() const { return static_cast<uint32>(WeaponIds[0]) | (static_cast<uint32>(WeaponIds[1]) << 8) | (static_cast<uint32>(WeaponIds[2]) << 16) | (static_cast<uint32>(ActiveSlot) << 24); }
@@ -324,6 +305,73 @@ struct MASSWAR_API FMassWarLoadoutFragment : public FMassFragment
 	}
 };
 
+/**
+ * How many rounds a unit's weapons have loaded and in reserve, and whether it is reloading. Only meaningful for a weapon whose
+ * MagazineSize stat is above 0 (a weapon with 0 has no ammo limit and this fragment is left alone). The numbers that drive it -
+ * magazine size, reserve, reload time, rounds per attack, auto reload - are stats, so weapons, ammo and upgrades set them.
+ * A slot starts "not initialised" and is filled (full magazine, full reserve) the first time its weapon is in hand.
+ * Server-owned; the active slot's numbers and the reloading flag are replicated for HUDs and reload animations.
+ */
+USTRUCT()
+struct MASSWAR_API FMassWarAmmoFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	static constexpr uint16 NotInitialised = 0xFFFF;
+	static constexpr uint8 NotReloading = 0xFF;
+
+	/** Rounds in the magazine of each slot's weapon. */
+	UPROPERTY()
+	uint16 Loaded[MassWarWeaponSlotCount] = { NotInitialised, NotInitialised, NotInitialised };
+
+	/** Rounds in reserve for each slot's weapon (ignored while that weapon's ReserveAmmo stat is negative = unlimited). */
+	UPROPERTY()
+	uint16 Reserve[MassWarWeaponSlotCount] = { 0, 0, 0 };
+
+	/** Seconds left of the reload in progress. */
+	UPROPERTY(Transient)
+	float ReloadRemaining = 0.f;
+
+	/** The slot being reloaded, NotReloading if none. */
+	UPROPERTY(Transient)
+	uint8 ReloadingSlot = NotReloading;
+
+	bool IsReloading() const { return ReloadingSlot != NotReloading; }
+
+	/** Loaded / reserve / reloading of one slot in one value, for replication (Loaded 13 bits, Reserve 18 bits, reloading 1 bit). */
+	uint32 Pack(uint8 Slot) const
+	{
+		if (Slot >= MassWarWeaponSlotCount)
+		{
+			return 0;
+		}
+		const uint32 PackedLoaded = Loaded[Slot] == NotInitialised ? 0x1FFFu : FMath::Min<uint32>(Loaded[Slot], 0x1FFEu);
+		const uint32 PackedReserve = FMath::Min<uint32>(Reserve[Slot], 0x3FFFFu);
+		return PackedLoaded | (PackedReserve << 13) | (ReloadingSlot == Slot ? 0x80000000u : 0u);
+	}
+
+	void Unpack(uint32 Packed, uint8 Slot)
+	{
+		if (Slot >= MassWarWeaponSlotCount)
+		{
+			return;
+		}
+		const uint32 PackedLoaded = Packed & 0x1FFFu;
+		Loaded[Slot] = PackedLoaded == 0x1FFFu ? NotInitialised : static_cast<uint16>(PackedLoaded);
+		Reserve[Slot] = static_cast<uint16>((Packed >> 13) & 0x3FFFFu);
+		const bool bReloading = (Packed & 0x80000000u) != 0;
+		if (bReloading)
+		{
+			ReloadingSlot = Slot;
+			ReloadRemaining = FMath::Max(ReloadRemaining, 0.01f);
+		}
+		else if (ReloadingSlot == Slot)
+		{
+			ReloadingSlot = NotReloading;
+			ReloadRemaining = 0.f;
+		}
+	}
+};
 USTRUCT()
 struct MASSWAR_API FMassWarNetIdFragment : public FMassFragment
 {

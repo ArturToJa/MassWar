@@ -49,6 +49,17 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Animation")
 	bool bHasWeapon = false;
 
+	/** The weapon in hand is being reloaded. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Weapon")
+	bool bIsReloading = false;
+
+	/** Rounds in the magazine / in reserve of the weapon in hand; -1 when it has no ammo limit. */
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Weapon")
+	int32 LoadedRounds = -1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Weapon")
+	int32 ReserveRounds = -1;
+
 	/** The exact weapon in hand (null when none) - for branching on a specific weapon rather than its hold type. */
 	UPROPERTY(BlueprintReadOnly, Category = "MassWar|Animation")
 	TObjectPtr<const UMassWarWeaponDefinition> ActiveWeapon = nullptr;

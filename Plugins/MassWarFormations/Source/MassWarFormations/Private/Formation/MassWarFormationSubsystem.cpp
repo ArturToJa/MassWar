@@ -7,6 +7,9 @@
 #include "MassCommonFragments.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "UnitBrain/MassWarUnitStateView.h"
+#include "Orders/MassWarOrderSubsystem.h"
+#include "Orders/MassWarOrderDefinition.h"
+#include "Orders/MassWarOrderTypes.h"
 #include "Engine/World.h"
 #include "Algo/Sort.h"
 
@@ -15,6 +18,14 @@ namespace
 	FVector RightOf(const FVector& Forward)
 	{
 		return FVector(-Forward.Y, Forward.X, 0.0);
+	}
+}
+
+void UMassWarFormationSubsystem::CancelUserOrder(FMassEntityManager& EntityManager, FMassEntityHandle Member) const
+{
+	if (UMassWarOrderSubsystem* Orders = GetWorld() ? GetWorld()->GetSubsystem<UMassWarOrderSubsystem>() : nullptr)
+	{
+		Orders->CancelOrder(EntityManager, Member, /*bStopUnit=*/ false);
 	}
 }
 
@@ -135,6 +146,7 @@ void UMassWarFormationSubsystem::ApplyMove(FMassEntityManager& EntityManager, FM
 		}
 		Taken[Best] = true;
 
+		CancelUserOrder(EntityManager, Formation.Members[Best]);
 		if (FMassWarOrderFragment* Order = EntityManager.GetFragmentDataPtr<FMassWarOrderFragment>(Formation.Members[Best]))
 		{
 			Order->OrderType = EMassWarOrderType::Move;
@@ -219,6 +231,51 @@ void UMassWarFormationSubsystem::IssueAttackOrder(FMassEntityManager& EntityMana
 	}
 }
 
+void UMassWarFormationSubsystem::IssueCustomOrder(FMassEntityManager& EntityManager, TConstArrayView<uint32> FormationIds, const UMassWarOrderDefinition* Order, const FMassWarOrderRequest& Request, uint32 RequesterPlayerId)
+{
+	UMassWarOrderSubsystem* Orders = GetWorld() ? GetWorld()->GetSubsystem<UMassWarOrderSubsystem>() : nullptr;
+	if (!Orders || !Order)
+	{
+		return;
+	}
+
+	for (const uint32 Id : FormationIds)
+	{
+		FMassWarFormation* Formation = Formations.Find(Id);
+		if (!Formation || Formation->OwnerPlayerId != RequesterPlayerId || !Refresh(EntityManager, *Formation))
+		{
+			continue;
+		}
+
+		int32 Given = 0;
+		for (const FMassEntityHandle& Member : Formation->Members)
+		{
+			FMassWarOrderRequest MemberRequest = Request;
+			if (Order->bKeepFormationOffsets)
+			{
+				const FTransformFragment* Transform = EntityManager.GetFragmentDataPtr<FTransformFragment>(Member);
+				if (Transform)
+				{
+					FVector Offset = Transform->GetTransform().GetLocation() - Formation->Anchor;
+					Offset.Z = 0.0;
+					MemberRequest.Location += Offset;
+					// A zero Location2 means "not given" (the behaviour falls back to the unit's own position): keep it that way.
+					if (!MemberRequest.Location2.IsNearlyZero())
+					{
+						MemberRequest.Location2 += Offset;
+					}
+				}
+			}
+			Given += Orders->IssueOrder(EntityManager, Member, Order, MemberRequest, /*bPlayerCommanded=*/ true);
+		}
+		if (Given > 0)
+		{
+			Formation->OrderType = EMassWarFormationOrderType::Custom;
+			Formation->TargetFormationId = 0;
+		}
+	}
+}
+
 void UMassWarFormationSubsystem::AssignTargets(FMassEntityManager& EntityManager, FMassWarFormation& Formation, const FMassWarFormation& Target) const
 {
 	// Living enemies, how many of our members already go for each, and who still needs a target.
@@ -279,6 +336,7 @@ void UMassWarFormationSubsystem::AssignTargets(FMassEntityManager& EntityManager
 			Best = 0; // every enemy is at capacity (rounding): just take the first
 		}
 
+		CancelUserOrder(EntityManager, Member);
 		if (FMassWarOrderFragment* Order = EntityManager.GetFragmentDataPtr<FMassWarOrderFragment>(Member))
 		{
 			Order->OrderType = EMassWarOrderType::Attack;
@@ -438,6 +496,23 @@ void UMassWarFormationSubsystem::Tick(float DeltaTime)
 				}
 			}
 			if (!bAnyStillMoving)
+			{
+				Formation.OrderType = EMassWarFormationOrderType::Idle;
+			}
+		}
+		else if (Formation.OrderType == EMassWarFormationOrderType::Custom)
+		{
+			bool bAnyOrdered = false;
+			for (const FMassEntityHandle& Member : Formation.Members)
+			{
+				const FMassWarCustomOrderFragment* Custom = EntityManager.GetFragmentDataPtr<FMassWarCustomOrderFragment>(Member);
+				if (Custom && Custom->IsActive())
+				{
+					bAnyOrdered = true;
+					break;
+				}
+			}
+			if (!bAnyOrdered)
 			{
 				Formation.OrderType = EMassWarFormationOrderType::Idle;
 			}

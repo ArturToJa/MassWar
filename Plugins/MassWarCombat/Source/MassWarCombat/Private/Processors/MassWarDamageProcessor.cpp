@@ -5,6 +5,10 @@
 #include "MassExecutionContext.h"
 #include "Fragments/MassWarUnitFragments.h"
 #include "Fragments/MassWarCombatFragments.h"
+#include "Stats/MassWarStatSubsystem.h"
+#include "Rules/MassWarDamageRule.h"
+#include "Fragments/MassWarAmmoUtil.h"
+#include "Orders/MassWarOrderTypes.h"
 #include "UnitBrain/MassWarUnitStateView.h"
 #include "Fragments/MassWarPerceptionFragments.h"
 #include "Perception/MassWarPerceptionSubsystem.h"
@@ -15,18 +19,25 @@ UMassWarDamageProcessor::UMassWarDamageProcessor()
 {
 	bAutoRegisterWithProcessingPhases = true;
 	ExecutionFlags = (int32)(EProcessorExecutionFlags::Server | EProcessorExecutionFlags::Standalone);
+	// The damage rule may be a Blueprint, which only runs on the game thread (and a landed attack writes perception state).
+	bRequiresGameThreadExecution = true;
 }
 
 void UMassWarDamageProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>& EntityManager)
 {
 	EntityQuery.AddRequirement<FMassWarOrderFragment>(EMassFragmentAccess::ReadWrite);
-	EntityQuery.AddRequirement<FMassWarCombatParamsFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassWarAttackCooldownFragment>(EMassFragmentAccess::ReadWrite);
+	EntityQuery.AddRequirement<FMassWarStatProfileFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarAttackFeedbackFragment>(EMassFragmentAccess::ReadWrite);
 	// Not read here - declared because a landed attack writes the victim's perception (see ReportDamage), which tells
 	// Mass this processor must not run at the same time as anything else touching perception data.
 	EntityQuery.AddRequirement<FMassWarPerceptionFragment>(EMassFragmentAccess::ReadWrite, EMassFragmentPresence::Optional);
+	// Only units whose unit type carries weapons have ammunition.
+	EntityQuery.AddRequirement<FMassWarAmmoFragment>(EMassFragmentAccess::ReadWrite, EMassFragmentPresence::Optional);
+	EntityQuery.AddRequirement<FMassWarLoadoutFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
+	EntityQuery.AddRequirement<FMassWarCustomOrderFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 }
 
 void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
@@ -35,10 +46,23 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 	UWorld* World = GetWorld();
 	UMassWarPerceptionSubsystem* PerceptionSubsystem = World ? World->GetSubsystem<UMassWarPerceptionSubsystem>() : nullptr;
 
-	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime, PerceptionSubsystem](FMassExecutionContext& Context)
+	const UMassWarStatSubsystem* StatSubsystem = World ? World->GetSubsystem<UMassWarStatSubsystem>() : nullptr;
+	if (!StatSubsystem)
+	{
+		return;
+	}
+	const UMassWarStatSubsystem::FView Stats = StatSubsystem->GetView();
+	const UMassWarCombatSubsystem* CombatSubsystem = World->GetSubsystem<UMassWarCombatSubsystem>();
+	const UMassWarDamageRule* DamageRule = CombatSubsystem ? CombatSubsystem->GetDamageRule() : nullptr;
+
+	EntityQuery.ForEachEntityChunk(Context, [&EntityManager, DeltaTime, PerceptionSubsystem, Stats, StatSubsystem, DamageRule](FMassExecutionContext& Context)
 	{
 		const TArrayView<FMassWarOrderFragment> Orders = Context.GetMutableFragmentView<FMassWarOrderFragment>();
-		const TArrayView<FMassWarCombatParamsFragment> CombatParamsList = Context.GetMutableFragmentView<FMassWarCombatParamsFragment>();
+		const TArrayView<FMassWarAttackCooldownFragment> CooldownList = Context.GetMutableFragmentView<FMassWarAttackCooldownFragment>();
+		const TConstArrayView<FMassWarStatProfileFragment> ProfileList = Context.GetFragmentView<FMassWarStatProfileFragment>();
+		const TArrayView<FMassWarAmmoFragment> AmmoList = Context.GetMutableFragmentView<FMassWarAmmoFragment>();
+		const TConstArrayView<FMassWarLoadoutFragment> LoadoutList = Context.GetFragmentView<FMassWarLoadoutFragment>();
+		const TConstArrayView<FMassWarCustomOrderFragment> CustomList = Context.GetFragmentView<FMassWarCustomOrderFragment>();
 		const TConstArrayView<FTransformFragment> Transforms = Context.GetFragmentView<FTransformFragment>();
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList = Context.GetMutableFragmentView<FMassWarAttackFeedbackFragment>();
@@ -52,7 +76,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 			{
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 				continue;
 			}
 
@@ -67,7 +91,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 			{
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 				continue;
 			}
 
@@ -77,43 +101,82 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 				// Target has no health (e.g. MassWarCombat trait not on its config) - nothing to do.
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 				continue;
 			}
 
-			FMassWarCombatParamsFragment& Combat = CombatParamsList[It];
-			Combat.TimeSinceLastAttack += DeltaTime;
+			FMassWarAttackCooldownFragment& Cooldown = CooldownList[It];
+			const uint16 Profile = ProfileList[It].ProfileIndex;
+			Cooldown.TimeSinceLastAttack += DeltaTime;
 
 			const float Distance = FVector::Dist(Transforms[It].GetTransform().GetLocation(), TargetView.GetLocation());
-			if (Distance > Combat.AttackRange)
+			if (Distance > Stats.Get(Profile, EMassWarStat::AttackRange))
 			{
 				continue;
 			}
 
-			if (Combat.TimeSinceLastAttack < Combat.AttackInterval)
+			if (Cooldown.TimeSinceLastAttack < Stats.Get(Profile, EMassWarStat::AttackInterval))
 			{
 				continue;
 			}
 
-			Combat.TimeSinceLastAttack = 0.f;
+			// A weapon with a magazine can only attack with rounds in it: not while reloading, and an empty magazine starts a
+			// reload (if the unit reloads by itself) instead of an attack.
+			int32 AmmoCost = 0;
+			FMassWarAmmoFragment* Ammo = AmmoList.IsEmpty() || LoadoutList.IsEmpty() ? nullptr : &AmmoList[It];
+			const uint8 AmmoSlot = Ammo ? LoadoutList[It].ActiveSlot : static_cast<uint8>(MassWarWeaponSlotCount);
+			if (Ammo && AmmoSlot < MassWarWeaponSlotCount && Stats.Get(Profile, EMassWarStat::MagazineSize) >= 0.5f)
+			{
+				AmmoCost = FMath::Max(1, FMath::RoundToInt(Stats.Get(Profile, EMassWarStat::AmmoPerAttack)));
+				if (Ammo->IsReloading() || Ammo->Loaded[AmmoSlot] == FMassWarAmmoFragment::NotInitialised)
+				{
+					continue;
+				}
+				if (Ammo->Loaded[AmmoSlot] < AmmoCost)
+				{
+					if (Stats.Get(Profile, EMassWarStat::AutoReload) >= 0.5f)
+					{
+						MassWarAmmo::TryStartReload(*Ammo, AmmoSlot, Stats, Profile);
+					}
+					continue;
+				}
+			}
+
+			Cooldown.TimeSinceLastAttack = 0.f;
+			if (AmmoCost > 0)
+			{
+				Ammo->Loaded[AmmoSlot] = static_cast<uint16>(Ammo->Loaded[AmmoSlot] - AmmoCost);
+				if (Ammo->Loaded[AmmoSlot] == 0 && Stats.Get(Profile, EMassWarStat::AutoReload) >= 0.5f)
+				{
+					MassWarAmmo::TryStartReload(*Ammo, AmmoSlot, Stats, Profile);
+				}
+			}
+			float AttackDamage = Stats.Get(Profile, EMassWarStat::AttackDamage);
+			if (DamageRule)
+			{
+				const FMassWarStatProfileFragment* TargetProfile = EntityManager.GetFragmentDataPtr<FMassWarStatProfileFragment>(Order.TargetEntity);
+				AttackDamage = DamageRule->ComputeDamage(StatSubsystem->MakeReader(Profile),
+					TargetProfile ? StatSubsystem->MakeReader(TargetProfile->ProfileIndex) : FMassWarStatReader(), AttackDamage, Distance);
+			}
 			++AttackFeedbackList[It].AttackCounter; // wraps; lets every machine's puppet play an attack animation
-			TargetHealth->Health -= Combat.AttackDamage;
+			TargetHealth->Health -= AttackDamage;
 
 			// Tell perception: the victim now knows who hit it and from where, and enemies nearby hear the attack.
 			if (PerceptionSubsystem)
 			{
 				const FMassEntityHandle Attacker = Context.GetEntity(It);
 				const FVector AttackerLocation = Transforms[It].GetTransform().GetLocation();
-				PerceptionSubsystem->ReportDamage(EntityManager, Order.TargetEntity, Attacker, AttackerLocation, Combat.AttackDamage);
-				if (Combat.AttackNoiseRange > 0.f)
+				PerceptionSubsystem->ReportDamage(EntityManager, Order.TargetEntity, Attacker, AttackerLocation, AttackDamage);
+				const float NoiseRange = Stats.Get(Profile, EMassWarStat::AttackNoiseRange);
+				if (NoiseRange > 0.f)
 				{
 					const FMassWarTeamFragment* AttackerTeam = EntityManager.GetFragmentDataPtr<FMassWarTeamFragment>(Attacker);
-					PerceptionSubsystem->ReportNoise(AttackerLocation, Combat.AttackNoiseRange, Attacker, AttackerTeam ? AttackerTeam->TeamId : 0);
+					PerceptionSubsystem->ReportNoise(AttackerLocation, NoiseRange, Attacker, AttackerTeam ? AttackerTeam->TeamId : 0);
 				}
 			}
 
 			UE_LOG(LogTemp, Log, TEXT("MassWarDamageProcessor: dealt %.1f damage to %s, health now %.1f"),
-				Combat.AttackDamage, *Order.TargetEntity.DebugGetDescription(), TargetHealth->Health);
+				AttackDamage, *Order.TargetEntity.DebugGetDescription(), TargetHealth->Health);
 
 			if (TargetHealth->Health <= 0.f)
 			{
@@ -141,7 +204,7 @@ void UMassWarDamageProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 
 				Order.OrderType = EMassWarOrderType::Idle;
 				Order.TargetEntity.Reset();
-				Order.bPlayerCommanded = false;
+				MassWarClearPlayerCommanded(Order, CustomList.IsEmpty() ? nullptr : &CustomList[It]);
 			}
 		}
 	});

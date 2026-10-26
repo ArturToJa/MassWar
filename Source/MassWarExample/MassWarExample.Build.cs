@@ -10,7 +10,7 @@ public class MassWarExample : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Niagara",
 
-            "MassWar", "MassWarCombat", "MassWarSelection", "MassWarStateTreeAI", "MassWarReplication", "MassWarFogOfWar", "MassWarEmbodiment", "MassWarFormations", "MassWarWeapons", "MassWarSpawning", "MassEntity", "MassCommon", "MassSpawner", "MassRepresentation", "MassLOD", "MassActors" });
+            "MassWar", "MassWarCombat", "MassWarSelection", "MassWarStateTreeAI", "MassWarReplication", "MassWarFogOfWar", "MassWarEmbodiment", "MassWarFormations", "MassWarWeapons", "MassWarSpawning", "GameplayTags", "MassEntity", "MassCommon", "MassSpawner", "MassRepresentation", "MassLOD", "MassActors" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
 
@@ -39,5 +39,11 @@ public class MassWarExample : ModuleRules
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");
 
 		// To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
+
+		// Since UE 5.8 the core Mass types (FMassFragment, FMassEntityHandle, FTransformFragment...) live in their own module.
+		if (Target.Version.MajorVersion > 5 || Target.Version.MinorVersion >= 8)
+		{
+			PublicDependencyModuleNames.Add("MassCore");
+		}
 	}
 }

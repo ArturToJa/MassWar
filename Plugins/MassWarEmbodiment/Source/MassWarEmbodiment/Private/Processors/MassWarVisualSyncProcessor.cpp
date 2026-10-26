@@ -29,6 +29,7 @@ void UMassWarVisualSyncProcessor::ConfigureQueries(const TSharedRef<FMassEntityM
 	EntityQuery.AddRequirement<FMassWarLifeFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarAttackFeedbackFragment>(EMassFragmentAccess::ReadOnly);
 	EntityQuery.AddRequirement<FMassWarLoadoutFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
+	EntityQuery.AddRequirement<FMassWarAmmoFragment>(EMassFragmentAccess::ReadOnly, EMassFragmentPresence::Optional);
 	EntityQuery.RequireMutatingWorldAccess(); // moves Actors
 }
 
@@ -44,6 +45,7 @@ void UMassWarVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMa
 		const TConstArrayView<FMassWarLifeFragment> LifeList = Context.GetFragmentView<FMassWarLifeFragment>();
 		const TConstArrayView<FMassWarAttackFeedbackFragment> AttackFeedbackList = Context.GetFragmentView<FMassWarAttackFeedbackFragment>();
 		const TConstArrayView<FMassWarLoadoutFragment> LoadoutList = Context.GetFragmentView<FMassWarLoadoutFragment>();
+		const TConstArrayView<FMassWarAmmoFragment> AmmoList = Context.GetFragmentView<FMassWarAmmoFragment>();
 
 		for (FMassExecutionContext::FEntityIterator It = Context.CreateEntityIterator(); It; ++It)
 		{
@@ -67,6 +69,14 @@ void UMassWarVisualSyncProcessor::Execute(FMassEntityManager& EntityManager, FMa
 				EntityState.bIsDying = LifeList[It].IsDying();
 				EntityState.AttackCounter = AttackFeedbackList[It].AttackCounter;
 				EntityState.ActiveWeaponId = LoadoutList.IsEmpty() ? 0 : LoadoutList[It].GetActiveWeaponId();
+				if (!AmmoList.IsEmpty() && !LoadoutList.IsEmpty() && LoadoutList[It].ActiveSlot < MassWarWeaponSlotCount)
+				{
+					const FMassWarAmmoFragment& Ammo = AmmoList[It];
+					const uint8 Slot = LoadoutList[It].ActiveSlot;
+					EntityState.bIsReloading = Ammo.ReloadingSlot == Slot;
+					EntityState.LoadedRounds = Ammo.Loaded[Slot] == FMassWarAmmoFragment::NotInitialised ? -1 : Ammo.Loaded[Slot];
+					EntityState.ReserveRounds = Ammo.Reserve[Slot];
+				}
 				Puppet->SyncFromEntity(Context.GetEntity(It), TransformList[It].GetTransform(), DeltaTime, EntityState);
 			}
 		}
