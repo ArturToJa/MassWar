@@ -259,7 +259,11 @@ void UMassWarFormationSubsystem::IssueCustomOrder(FMassEntityManager& EntityMana
 					FVector Offset = Transform->GetTransform().GetLocation() - Formation->Anchor;
 					Offset.Z = 0.0;
 					MemberRequest.Location += Offset;
-					MemberRequest.Location2 += Offset;
+					// A zero Location2 means "not given" (the behaviour falls back to the unit's own position): keep it that way.
+					if (!MemberRequest.Location2.IsNearlyZero())
+					{
+						MemberRequest.Location2 += Offset;
+					}
 				}
 			}
 			Given += Orders->IssueOrder(EntityManager, Member, Order, MemberRequest, /*bPlayerCommanded=*/ true);
